@@ -97,27 +97,6 @@ def fetch_item_details(items):
         except Exception as e:
             print(f"[thumb bundle] {e}")
 
-    # Creator names — GET endpoints (no CSRF needed)
-    def get_creator(item):
-        iid, tp = item["id"], item["tp"]
-        try:
-            if tp == "B":
-                d = roblox_public(f"https://catalog.roblox.com/v1/bundles/{iid}/details")
-                return f"B_{iid}", d.get("creator", {}).get("name", "")
-            else:
-                d = roblox_public(f"https://economy.roblox.com/v1/assets/{iid}/details")
-                return f"A_{iid}", d.get("Creator", {}).get("Name", "")
-        except Exception as e:
-            print(f"[creator {tp}_{iid}] {e}")
-            return f"{tp}_{iid}", ""
-
-    unique = list({f"{e['tp']}_{e['id']}": e for e in items}.values())
-    with ThreadPoolExecutor(max_workers=10) as ex:
-        for key, name in ex.map(get_creator, unique):
-            if key not in result:
-                result[key] = {"thumb": "", "creator": ""}
-            result[key]["creator"] = name
-
     return result
 
 HTML = """<!DOCTYPE html>
@@ -295,15 +274,15 @@ async function search(){
     document.getElementById('statsRow').style.display='flex'
     document.getElementById('tbody').innerHTML=items.map(e=>{
       const isB=e.tp==='B',{date,time}=fmtParts(e.ts)
-      return `<tr><td><img class="thumb" data-id="${e.id}" data-tp="${e.tp}" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></td><td class="item-name">${e.n||'ID:'+e.id}</td><td><span class="creator" data-id="${e.id}" data-tp="${e.tp}">...</span></td><td class="price">${e.p?'R$ '+e.p:'ฟรี'}</td><td><span class="badge ${isB?'bb':'ba'}">${isB?'Bundle':'Asset'}</span></td><td><div class="date-cell">${date}</div></td><td><div class="time-cell">${time}</div></td></tr>`
+      return `<tr><td><img class="thumb" data-id="${e.id}" data-tp="${e.tp}" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></td><td class="item-name">${e.n||'ID:'+e.id}</td><td class="creator">${e.cr||'—'}</td><td class="price">${e.p?'R$ '+e.p:'ฟรี'}</td><td><span class="badge ${isB?'bb':'ba'}">${isB?'Bundle':'Asset'}</span></td><td><div class="date-cell">${date}</div></td><td><div class="time-cell">${time}</div></td></tr>`
     }).join('')
     document.getElementById('tbl').style.display='table'
-    loadItemDetails(items)
+    loadThumbnails(items)
   }catch(e){status.className='status err';status.textContent='เกิดข้อผิดพลาด: '+e.message}
   finally{btn.disabled=false}
 }
 
-async function loadItemDetails(items){
+async function loadThumbnails(items){
   try{
     const unique=[...new Map(items.map(e=>[`${e.tp}_${e.id}`,{id:e.id,tp:e.tp}])).values()]
     const r=await fetch('/api/item-details',{
@@ -315,10 +294,6 @@ async function loadItemDetails(items){
     document.querySelectorAll('img.thumb').forEach(img=>{
       const key=`${img.dataset.tp}_${img.dataset.id}`
       if(map[key]?.thumb) img.src=map[key].thumb
-    })
-    document.querySelectorAll('span.creator').forEach(el=>{
-      const key=`${el.dataset.tp}_${el.dataset.id}`
-      el.textContent=map[key]?.creator||'—'
     })
   }catch{}
 }

@@ -105,7 +105,7 @@ def fetch_item_details(items):
                 d = roblox_public(f"https://catalog.roblox.com/v1/bundles/{iid}/details")
                 return f"B_{iid}", d.get("creator", {}).get("name", "")
             else:
-                d = roblox_public(f"https://api.roblox.com/marketplace/productinfo?assetId={iid}")
+                d = roblox_public(f"https://economy.roblox.com/v1/assets/{iid}/details")
                 return f"A_{iid}", d.get("Creator", {}).get("Name", "")
         except Exception as e:
             print(f"[creator {tp}_{iid}] {e}")
@@ -361,7 +361,7 @@ class Handler(BaseHTTPRequestHandler):
                     d   = roblox_public(url)
                     out = {"url": url, "creator": d.get("creator", {}), "raw_keys": list(d.keys())}
                 else:
-                    url = f"https://api.roblox.com/marketplace/productinfo?assetId={iid}"
+                    url = f"https://economy.roblox.com/v1/assets/{iid}/details"
                     d   = roblox_public(url)
                     out = {"url": url, "Creator": d.get("Creator", {}), "raw_keys": list(d.keys())}
             except Exception as e:

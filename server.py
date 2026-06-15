@@ -2,6 +2,7 @@
 import os, json, time
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.request, urllib.parse, urllib.error
+from concurrent.futures import ThreadPoolExecutor
 
 API_KEY     = os.environ.get("API_KEY", "")
 UNIVERSE_ID = os.environ.get("UNIVERSE_ID", "")
@@ -59,8 +60,17 @@ def fetch_history(uid, from_ts=None, to_ts=None):
     result.sort(key=lambda x: x["ts"], reverse=True)
     return result
 
+UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
+
+def roblox_public(url, data=None, method="GET"):
+    headers = {"User-Agent": UA}
+    if data:
+        headers["Content-Type"] = "application/json"
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return json.loads(r.read().decode())
+
 def fetch_item_details(items):
-    """items = list of {id, tp}  →  returns {key: {thumb, creator}}"""
     result = {}
     assets  = [e["id"] for e in items if e["tp"] != "B"]
     bundles = [e["id"] for e in items if e["tp"] == "B"]
@@ -69,43 +79,44 @@ def fetch_item_details(items):
     for i in range(0, len(assets), 100):
         ids = ",".join(str(x) for x in assets[i:i+100])
         try:
-            url = f"https://thumbnails.roblox.com/v1/assets?assetIds={ids}&size=150x150&format=Png"
-            req = urllib.request.Request(url)
-            with urllib.request.urlopen(req, timeout=8) as r:
-                for x in json.loads(r.read().decode()).get("data", []):
-                    if x.get("state") == "Completed":
-                        result[f"A_{x['targetId']}"] = {"thumb": x["imageUrl"], "creator": ""}
-        except: pass
+            d = roblox_public(f"https://thumbnails.roblox.com/v1/assets?assetIds={ids}&size=150x150&format=Png")
+            for x in d.get("data", []):
+                if x.get("state") == "Completed":
+                    result[f"A_{x['targetId']}"] = {"thumb": x["imageUrl"], "creator": ""}
+        except Exception as e:
+            print(f"[thumb asset] {e}")
 
     # Thumbnails — bundles
     for i in range(0, len(bundles), 100):
         ids = ",".join(str(x) for x in bundles[i:i+100])
         try:
-            url = f"https://thumbnails.roblox.com/v1/bundles/thumbnails?bundleIds={ids}&size=150x150&format=Png"
-            req = urllib.request.Request(url)
-            with urllib.request.urlopen(req, timeout=8) as r:
-                for x in json.loads(r.read().decode()).get("data", []):
-                    if x.get("state") == "Completed":
-                        result[f"B_{x['targetId']}"] = {"thumb": x["imageUrl"], "creator": ""}
-        except: pass
+            d = roblox_public(f"https://thumbnails.roblox.com/v1/bundles/thumbnails?bundleIds={ids}&size=150x150&format=Png")
+            for x in d.get("data", []):
+                if x.get("state") == "Completed":
+                    result[f"B_{x['targetId']}"] = {"thumb": x["imageUrl"], "creator": ""}
+        except Exception as e:
+            print(f"[thumb bundle] {e}")
 
-    # Creator names — catalog API
-    for i in range(0, len(items), 120):
-        batch = [{"itemType": "Bundle" if e["tp"] == "B" else "Asset", "id": e["id"]} for e in items[i:i+120]]
+    # Creator names — GET endpoints (no CSRF needed)
+    def get_creator(item):
+        iid, tp = item["id"], item["tp"]
         try:
-            body = json.dumps({"items": batch}).encode()
-            req  = urllib.request.Request(
-                "https://catalog.roblox.com/v1/catalog/items/details",
-                data=body, headers={"Content-Type": "application/json"}, method="POST"
-            )
-            with urllib.request.urlopen(req, timeout=8) as r:
-                for x in json.loads(r.read().decode()).get("data", []):
-                    tp  = "B" if x.get("itemType") == "Bundle" else "A"
-                    key = f"{tp}_{x['id']}"
-                    if key not in result:
-                        result[key] = {"thumb": "", "creator": ""}
-                    result[key]["creator"] = x.get("creatorName", "")
-        except: pass
+            if tp == "B":
+                d = roblox_public(f"https://catalog.roblox.com/v1/bundles/{iid}/details")
+                return f"B_{iid}", d.get("creator", {}).get("name", "")
+            else:
+                d = roblox_public(f"https://economy.roblox.com/v1/assets/{iid}/details")
+                return f"A_{iid}", d.get("Creator", {}).get("Name", "")
+        except Exception as e:
+            print(f"[creator {tp}_{iid}] {e}")
+            return f"{tp}_{iid}", ""
+
+    unique = list({f"{e['tp']}_{e['id']}": e for e in items}.values())
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        for key, name in ex.map(get_creator, unique):
+            if key not in result:
+                result[key] = {"thumb": "", "creator": ""}
+            result[key]["creator"] = name
 
     return result
 
@@ -344,17 +355,6 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"ok": True})
             else:
                 self._json(401, {"message": "Unauthorized"})
-        elif parsed.path == "/api/item-details":
-            if not self._check_auth():
-                self._json(401, {"message": "Unauthorized"}); return
-            try:
-                length = int(self.headers.get("Content-Length", 0))
-                body   = self.rfile.read(length)
-                items  = json.loads(body.decode())
-                self._json(200, fetch_item_details(items))
-            except Exception as e:
-                self._json(500, {"message": str(e)})
-            return
         elif parsed.path == "/api/history":
             if not self._check_auth():
                 self._json(401, {"message": "Unauthorized"}); return

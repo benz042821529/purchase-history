@@ -102,11 +102,13 @@ tbody tr:hover{box-shadow:0 2px 8px rgba(79,142,247,.15)}
 td{padding:11px 14px;border-top:1px solid #f0f2f7;border-bottom:1px solid #f0f2f7}
 td:first-child{border-left:1px solid #f0f2f7;border-radius:10px 0 0 10px}
 td:last-child{border-right:1px solid #f0f2f7;border-radius:0 10px 10px 0}
+.thumb{width:54px;height:54px;border-radius:8px;object-fit:cover;background:#f0f2f7;display:block}
 .item-name{color:#1a1a2e;font-weight:600}
 .price{color:#f59e0b;font-weight:700}
 .badge{display:inline-block;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:700}
 .ba{background:#eff6ff;color:#3b82f6}.bb{background:#f5f3ff;color:#7c3aed}
 .date-cell{color:#1a1a2e;font-size:13px;font-weight:500}
+.creator{color:#888;font-size:12px}
 .time-cell{color:#aaa;font-size:12px;margin-top:2px}
 
 /* Login overlay */
@@ -165,7 +167,7 @@ td:last-child{border-right:1px solid #f0f2f7;border-radius:0 10px 10px 0}
 </div>
 <div class="tbl-wrap">
   <table id="tbl" style="display:none">
-    <thead><tr><th>สินค้า</th><th>ราคา</th><th>ประเภท</th><th>วันที่</th><th>เวลา</th></tr></thead>
+    <thead><tr><th style="width:66px"></th><th>สินค้า</th><th>ผู้สร้าง</th><th>ราคา</th><th>ประเภท</th><th>วันที่</th><th>เวลา</th></tr></thead>
     <tbody id="tbody"></tbody>
   </table>
 </div>
@@ -232,11 +234,63 @@ async function search(){
     document.getElementById('statsRow').style.display='flex'
     document.getElementById('tbody').innerHTML=items.map(e=>{
       const isB=e.tp==='B',{date,time}=fmtParts(e.ts)
-      return `<tr><td class="item-name">${e.n||'ID:'+e.id}</td><td class="price">${e.p?'R$ '+e.p:'ฟรี'}</td><td><span class="badge ${isB?'bb':'ba'}">${isB?'Bundle':'Asset'}</span></td><td><div class="date-cell">${date}</div></td><td><div class="time-cell">${time}</div></td></tr>`
+      return `<tr><td><img class="thumb" data-id="${e.id}" data-tp="${e.tp}" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></td><td class="item-name">${e.n||'ID:'+e.id}</td><td><span class="creator" data-id="${e.id}" data-tp="${e.tp}">...</span></td><td class="price">${e.p?'R$ '+e.p:'ฟรี'}</td><td><span class="badge ${isB?'bb':'ba'}">${isB?'Bundle':'Asset'}</span></td><td><div class="date-cell">${date}</div></td><td><div class="time-cell">${time}</div></td></tr>`
     }).join('')
     document.getElementById('tbl').style.display='table'
+    loadThumbnails(items)
+    loadCreators(items)
   }catch(e){status.className='status err';status.textContent='เกิดข้อผิดพลาด: '+e.message}
   finally{btn.disabled=false}
+}
+
+async function loadCreators(items){
+  const map = {}
+  const BATCH = 120
+  for(let i=0;i<items.length;i+=BATCH){
+    const batch=items.slice(i,i+BATCH).map(e=>({
+      itemType: e.tp==='B' ? 'Bundle' : 'Asset',
+      id: e.id
+    }))
+    try{
+      const r=await fetch('https://catalog.roblox.com/v1/catalog/items/details',{
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({items:batch})
+      })
+      const d=await r.json()
+      for(const x of d.data||[]) map[`${x.itemType==='Bundle'?'B':'A'}_${x.id}`]=x.creatorName||'—'
+    }catch{}
+  }
+  document.querySelectorAll('span.creator').forEach(el=>{
+    const key=`${el.dataset.tp}_${el.dataset.id}`
+    el.textContent=map[key]||'—'
+  })
+}
+
+async function loadThumbnails(items){
+  const assets  = [...new Set(items.filter(e=>e.tp!=='B').map(e=>e.id))]
+  const bundles = [...new Set(items.filter(e=>e.tp==='B').map(e=>e.id))]
+  const map = {}
+  for(let i=0;i<assets.length;i+=100){
+    try{
+      const ids=assets.slice(i,i+100).join(',')
+      const r=await fetch(`https://thumbnails.roblox.com/v1/assets?assetIds=${ids}&size=150x150&format=Png`)
+      const d=await r.json()
+      for(const x of d.data) if(x.state==='Completed') map[`A_${x.targetId}`]=x.imageUrl
+    }catch{}
+  }
+  for(let i=0;i<bundles.length;i+=100){
+    try{
+      const ids=bundles.slice(i,i+100).join(',')
+      const r=await fetch(`https://thumbnails.roblox.com/v1/bundles/thumbnails?bundleIds=${ids}&size=150x150&format=Png`)
+      const d=await r.json()
+      for(const x of d.data) if(x.state==='Completed') map[`B_${x.targetId}`]=x.imageUrl
+    }catch{}
+  }
+  document.querySelectorAll('img.thumb').forEach(img=>{
+    const key=`${img.dataset.tp}_${img.dataset.id}`
+    if(map[key]) img.src=map[key]
+  })
 }
 </script>
 </body>

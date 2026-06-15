@@ -59,6 +59,56 @@ def fetch_history(uid, from_ts=None, to_ts=None):
     result.sort(key=lambda x: x["ts"], reverse=True)
     return result
 
+def fetch_item_details(items):
+    """items = list of {id, tp}  →  returns {key: {thumb, creator}}"""
+    result = {}
+    assets  = [e["id"] for e in items if e["tp"] != "B"]
+    bundles = [e["id"] for e in items if e["tp"] == "B"]
+
+    # Thumbnails — assets
+    for i in range(0, len(assets), 100):
+        ids = ",".join(str(x) for x in assets[i:i+100])
+        try:
+            url = f"https://thumbnails.roblox.com/v1/assets?assetIds={ids}&size=150x150&format=Png"
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=8) as r:
+                for x in json.loads(r.read().decode()).get("data", []):
+                    if x.get("state") == "Completed":
+                        result[f"A_{x['targetId']}"] = {"thumb": x["imageUrl"], "creator": ""}
+        except: pass
+
+    # Thumbnails — bundles
+    for i in range(0, len(bundles), 100):
+        ids = ",".join(str(x) for x in bundles[i:i+100])
+        try:
+            url = f"https://thumbnails.roblox.com/v1/bundles/thumbnails?bundleIds={ids}&size=150x150&format=Png"
+            req = urllib.request.Request(url)
+            with urllib.request.urlopen(req, timeout=8) as r:
+                for x in json.loads(r.read().decode()).get("data", []):
+                    if x.get("state") == "Completed":
+                        result[f"B_{x['targetId']}"] = {"thumb": x["imageUrl"], "creator": ""}
+        except: pass
+
+    # Creator names — catalog API
+    for i in range(0, len(items), 120):
+        batch = [{"itemType": "Bundle" if e["tp"] == "B" else "Asset", "id": e["id"]} for e in items[i:i+120]]
+        try:
+            body = json.dumps({"items": batch}).encode()
+            req  = urllib.request.Request(
+                "https://catalog.roblox.com/v1/catalog/items/details",
+                data=body, headers={"Content-Type": "application/json"}, method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=8) as r:
+                for x in json.loads(r.read().decode()).get("data", []):
+                    tp  = "B" if x.get("itemType") == "Bundle" else "A"
+                    key = f"{tp}_{x['id']}"
+                    if key not in result:
+                        result[key] = {"thumb": "", "creator": ""}
+                    result[key]["creator"] = x.get("creatorName", "")
+        except: pass
+
+    return result
+
 HTML = """<!DOCTYPE html>
 <html lang="th">
 <head>
@@ -237,60 +287,29 @@ async function search(){
       return `<tr><td><img class="thumb" data-id="${e.id}" data-tp="${e.tp}" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></td><td class="item-name">${e.n||'ID:'+e.id}</td><td><span class="creator" data-id="${e.id}" data-tp="${e.tp}">...</span></td><td class="price">${e.p?'R$ '+e.p:'ฟรี'}</td><td><span class="badge ${isB?'bb':'ba'}">${isB?'Bundle':'Asset'}</span></td><td><div class="date-cell">${date}</div></td><td><div class="time-cell">${time}</div></td></tr>`
     }).join('')
     document.getElementById('tbl').style.display='table'
-    loadThumbnails(items)
-    loadCreators(items)
+    loadItemDetails(items)
   }catch(e){status.className='status err';status.textContent='เกิดข้อผิดพลาด: '+e.message}
   finally{btn.disabled=false}
 }
 
-async function loadCreators(items){
-  const map = {}
-  const BATCH = 120
-  for(let i=0;i<items.length;i+=BATCH){
-    const batch=items.slice(i,i+BATCH).map(e=>({
-      itemType: e.tp==='B' ? 'Bundle' : 'Asset',
-      id: e.id
-    }))
-    try{
-      const r=await fetch('https://catalog.roblox.com/v1/catalog/items/details',{
-        method:'POST',
-        headers:{'Content-Type':'application/json'},
-        body:JSON.stringify({items:batch})
-      })
-      const d=await r.json()
-      for(const x of d.data||[]) map[`${x.itemType==='Bundle'?'B':'A'}_${x.id}`]=x.creatorName||'—'
-    }catch{}
-  }
-  document.querySelectorAll('span.creator').forEach(el=>{
-    const key=`${el.dataset.tp}_${el.dataset.id}`
-    el.textContent=map[key]||'—'
-  })
-}
-
-async function loadThumbnails(items){
-  const assets  = [...new Set(items.filter(e=>e.tp!=='B').map(e=>e.id))]
-  const bundles = [...new Set(items.filter(e=>e.tp==='B').map(e=>e.id))]
-  const map = {}
-  for(let i=0;i<assets.length;i+=100){
-    try{
-      const ids=assets.slice(i,i+100).join(',')
-      const r=await fetch(`https://thumbnails.roblox.com/v1/assets?assetIds=${ids}&size=150x150&format=Png`)
-      const d=await r.json()
-      for(const x of d.data) if(x.state==='Completed') map[`A_${x.targetId}`]=x.imageUrl
-    }catch{}
-  }
-  for(let i=0;i<bundles.length;i+=100){
-    try{
-      const ids=bundles.slice(i,i+100).join(',')
-      const r=await fetch(`https://thumbnails.roblox.com/v1/bundles/thumbnails?bundleIds=${ids}&size=150x150&format=Png`)
-      const d=await r.json()
-      for(const x of d.data) if(x.state==='Completed') map[`B_${x.targetId}`]=x.imageUrl
-    }catch{}
-  }
-  document.querySelectorAll('img.thumb').forEach(img=>{
-    const key=`${img.dataset.tp}_${img.dataset.id}`
-    if(map[key]) img.src=map[key]
-  })
+async function loadItemDetails(items){
+  try{
+    const unique=[...new Map(items.map(e=>[`${e.tp}_${e.id}`,{id:e.id,tp:e.tp}])).values()]
+    const r=await fetch('/api/item-details',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-Password':_pw},
+      body:JSON.stringify(unique)
+    })
+    const map=await r.json()
+    document.querySelectorAll('img.thumb').forEach(img=>{
+      const key=`${img.dataset.tp}_${img.dataset.id}`
+      if(map[key]?.thumb) img.src=map[key].thumb
+    })
+    document.querySelectorAll('span.creator').forEach(el=>{
+      const key=`${el.dataset.tp}_${el.dataset.id}`
+      el.textContent=map[key]?.creator||'—'
+    })
+  }catch{}
 }
 </script>
 </body>
@@ -303,6 +322,21 @@ class Handler(BaseHTTPRequestHandler):
     def _check_auth(self):
         return self.headers.get("X-Password", "") == PASSWORD
 
+    def do_POST(self):
+        parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/api/item-details":
+            if not self._check_auth():
+                self._json(401, {"message": "Unauthorized"}); return
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body   = self.rfile.read(length)
+                items  = json.loads(body.decode())
+                self._json(200, fetch_item_details(items))
+            except Exception as e:
+                self._json(500, {"message": str(e)})
+        else:
+            self._json(404, {"message": "Not found"})
+
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/api/auth":
@@ -310,6 +344,17 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"ok": True})
             else:
                 self._json(401, {"message": "Unauthorized"})
+        elif parsed.path == "/api/item-details":
+            if not self._check_auth():
+                self._json(401, {"message": "Unauthorized"}); return
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body   = self.rfile.read(length)
+                items  = json.loads(body.decode())
+                self._json(200, fetch_item_details(items))
+            except Exception as e:
+                self._json(500, {"message": str(e)})
+            return
         elif parsed.path == "/api/history":
             if not self._check_auth():
                 self._json(401, {"message": "Unauthorized"}); return

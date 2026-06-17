@@ -97,6 +97,7 @@ def fetch_item_details(items):
         except Exception as e:
             print(f"[thumb bundle] {e}")
 
+<<<<<<< HEAD
     # Creator names + price — GET endpoints (no CSRF needed)
     def get_details(item):
         iid, tp = item["id"], item["tp"]
@@ -124,6 +125,8 @@ def fetch_item_details(items):
             if price:
                 result[key]["price"] = price
 
+=======
+>>>>>>> edda773b5f41bfdf38bcb868c6bb4007010fbeff
     return result
 
 HTML = """<!DOCTYPE html>
@@ -301,15 +304,19 @@ async function search(){
     document.getElementById('statsRow').style.display='flex'
     document.getElementById('tbody').innerHTML=items.map(e=>{
       const isB=e.tp==='B',{date,time}=fmtParts(e.ts)
+<<<<<<< HEAD
       return `<tr><td><img class="thumb" data-id="${e.id}" data-tp="${e.tp}" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></td><td class="item-name">${e.n||'ID:'+e.id}</td><td><span class="creator" data-id="${e.id}" data-tp="${e.tp}">${e.cr||'...'}</span></td><td class="price" data-id="${e.id}" data-tp="${e.tp}">${e.p?'R$ '+e.p:'ฟรี'}</td><td><span class="badge ${isB?'bb':'ba'}">${isB?'Bundle':'Asset'}</span></td><td><div class="date-cell">${date}</div></td><td><div class="time-cell">${time}</div></td></tr>`
+=======
+      return `<tr><td><img class="thumb" data-id="${e.id}" data-tp="${e.tp}" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></td><td class="item-name">${e.n||'ID:'+e.id}</td><td class="creator">${e.cr||'—'}</td><td class="price">${e.p?'R$ '+e.p:'ฟรี'}</td><td><span class="badge ${isB?'bb':'ba'}">${isB?'Bundle':'Asset'}</span></td><td><div class="date-cell">${date}</div></td><td><div class="time-cell">${time}</div></td></tr>`
+>>>>>>> edda773b5f41bfdf38bcb868c6bb4007010fbeff
     }).join('')
     document.getElementById('tbl').style.display='table'
-    loadItemDetails(items)
+    loadThumbnails(items)
   }catch(e){status.className='status err';status.textContent='เกิดข้อผิดพลาด: '+e.message}
   finally{btn.disabled=false}
 }
 
-async function loadItemDetails(items){
+async function loadThumbnails(items){
   try{
     const unique=[...new Map(items.map(e=>[`${e.tp}_${e.id}`,{id:e.id,tp:e.tp}])).values()]
     const r=await fetch('/api/item-details',{
@@ -322,6 +329,7 @@ async function loadItemDetails(items){
       const key=`${img.dataset.tp}_${img.dataset.id}`
       if(map[key]?.thumb) img.src=map[key].thumb
     })
+<<<<<<< HEAD
     document.querySelectorAll('span.creator').forEach(el=>{
       const key=`${el.dataset.tp}_${el.dataset.id}`
       const c=map[key]?.creator
@@ -333,6 +341,8 @@ async function loadItemDetails(items){
       const p=map[key]?.price
       if(p) el.textContent='R$ '+p
     })
+=======
+>>>>>>> edda773b5f41bfdf38bcb868c6bb4007010fbeff
   }catch{}
 }
 </script>
@@ -363,6 +373,24 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/api/debug-creator":
+            p   = urllib.parse.parse_qs(parsed.query)
+            iid = int((p.get("id") or ["0"])[0])
+            tp  = (p.get("tp") or ["A"])[0]
+            out = {}
+            try:
+                if tp == "B":
+                    url = f"https://catalog.roblox.com/v1/bundles/{iid}/details"
+                    d   = roblox_public(url)
+                    out = {"url": url, "creator": d.get("creator", {}), "raw_keys": list(d.keys())}
+                else:
+                    url = f"https://economy.roblox.com/v1/assets/{iid}/details"
+                    d   = roblox_public(url)
+                    out = {"url": url, "Creator": d.get("Creator", {}), "raw_keys": list(d.keys())}
+            except Exception as e:
+                out = {"error": str(e)}
+            self._json(200, out)
+            return
         if parsed.path == "/api/auth":
             if self._check_auth():
                 self._json(200, {"ok": True})

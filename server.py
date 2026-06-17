@@ -343,6 +343,14 @@ async function loadThumbnails(items){
       const p=map[key]?.price
       if(p) el.textContent='R$ '+p
     })
+    // คำนวณ total ใหม่หลัง API อัปเดตราคาแล้ว
+    let total=0
+    document.querySelectorAll('td.price[data-id]').forEach(el=>{
+      const val=el.textContent.replace('R$ ','').replace(',','')
+      const n=parseInt(val)
+      if(!isNaN(n)) total+=n
+    })
+    document.getElementById('sRevenue').textContent='R$ '+total.toLocaleString()
   }catch{}
 }
 </script>

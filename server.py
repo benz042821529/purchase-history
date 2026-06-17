@@ -97,30 +97,34 @@ def fetch_item_details(items):
         except Exception as e:
             print(f"[thumb bundle] {e}")
 
-    # Creator names + price — GET endpoints (no CSRF needed)
+    # Creator names + price + item name — GET endpoints (no CSRF needed)
     def get_details(item):
         iid, tp = item["id"], item["tp"]
         try:
             if tp == "B":
                 d = roblox_public(f"https://catalog.roblox.com/v1/bundles/{iid}/details")
+                iname   = d.get("name", "")
                 creator = d.get("creator", {}).get("name", "")
                 price   = d.get("product", {}).get("priceInRobux") or 0
-                return f"B_{iid}", creator, price
+                return f"B_{iid}", iname, creator, price
             else:
                 d = roblox_public(f"https://economy.roblox.com/v1/assets/{iid}/details")
+                iname   = d.get("Name", "")
                 creator = d.get("Creator", {}).get("Name", "")
                 price   = d.get("PriceInRobux") or 0
-                return f"A_{iid}", creator, price
+                return f"A_{iid}", iname, creator, price
         except Exception as e:
             print(f"[details {tp}_{iid}] {e}")
-            return f"{tp}_{iid}", "", 0
+            return f"{tp}_{iid}", "", "", 0
 
     unique = list({f"{e['tp']}_{e['id']}": e for e in items}.values())
     with ThreadPoolExecutor(max_workers=10) as ex:
-        for key, name, price in ex.map(get_details, unique):
+        for key, iname, creator, price in ex.map(get_details, unique):
             if key not in result:
-                result[key] = {"thumb": "", "creator": "", "price": 0}
-            result[key]["creator"] = name
+                result[key] = {"thumb": "", "name": "", "creator": "", "price": 0}
+            if iname:
+                result[key]["name"] = iname
+            result[key]["creator"] = creator
             if price:
                 result[key]["price"] = price
 
@@ -302,7 +306,7 @@ async function search(){
     document.getElementById('statsRow').style.display='flex'
     document.getElementById('tbody').innerHTML=items.map(e=>{
       const isB=e.tp==='B',{date,time}=fmtParts(e.ts)
-      return `<tr><td><img class="thumb" data-id="${e.id}" data-tp="${e.tp}" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></td><td class="item-name">${e.n||'ID:'+e.id}</td><td><span class="creator" data-id="${e.id}" data-tp="${e.tp}">${e.cr||'...'}</span></td><td class="price" data-id="${e.id}" data-tp="${e.tp}">${e.p?'R$ '+e.p:'ฟรี'}</td><td><span class="badge ${isB?'bb':'ba'}">${isB?'Bundle':'Asset'}</span></td><td><div class="date-cell">${date}</div></td><td><div class="time-cell">${time}</div></td></tr>`
+      return `<tr><td><img class="thumb" data-id="${e.id}" data-tp="${e.tp}" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></td><td class="item-name" data-id="${e.id}" data-tp="${e.tp}">${e.n||'ID:'+e.id}</td><td><span class="creator" data-id="${e.id}" data-tp="${e.tp}">${e.cr||'...'}</span></td><td class="price" data-id="${e.id}" data-tp="${e.tp}">${e.p?'R$ '+e.p:'ฟรี'}</td><td><span class="badge ${isB?'bb':'ba'}">${isB?'Bundle':'Asset'}</span></td><td><div class="date-cell">${date}</div></td><td><div class="time-cell">${time}</div></td></tr>`
     }).join('')
     document.getElementById('tbl').style.display='table'
     loadThumbnails(items)
@@ -322,6 +326,11 @@ async function loadThumbnails(items){
     document.querySelectorAll('img.thumb').forEach(img=>{
       const key=`${img.dataset.tp}_${img.dataset.id}`
       if(map[key]?.thumb) img.src=map[key].thumb
+    })
+    document.querySelectorAll('td.item-name[data-id]').forEach(el=>{
+      const key=`${el.dataset.tp}_${el.dataset.id}`
+      const n=map[key]?.name
+      if(n) el.textContent=n
     })
     document.querySelectorAll('span.creator').forEach(el=>{
       const key=`${el.dataset.tp}_${el.dataset.id}`

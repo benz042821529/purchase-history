@@ -97,26 +97,32 @@ def fetch_item_details(items):
         except Exception as e:
             print(f"[thumb bundle] {e}")
 
-    # Creator names — GET endpoints (no CSRF needed)
-    def get_creator(item):
+    # Creator names + price — GET endpoints (no CSRF needed)
+    def get_details(item):
         iid, tp = item["id"], item["tp"]
         try:
             if tp == "B":
                 d = roblox_public(f"https://catalog.roblox.com/v1/bundles/{iid}/details")
-                return f"B_{iid}", d.get("creator", {}).get("name", "")
+                creator = d.get("creator", {}).get("name", "")
+                price   = d.get("product", {}).get("priceInRobux") or 0
+                return f"B_{iid}", creator, price
             else:
                 d = roblox_public(f"https://economy.roblox.com/v1/assets/{iid}/details")
-                return f"A_{iid}", d.get("Creator", {}).get("Name", "")
+                creator = d.get("Creator", {}).get("Name", "")
+                price   = d.get("PriceInRobux") or 0
+                return f"A_{iid}", creator, price
         except Exception as e:
-            print(f"[creator {tp}_{iid}] {e}")
-            return f"{tp}_{iid}", ""
+            print(f"[details {tp}_{iid}] {e}")
+            return f"{tp}_{iid}", "", 0
 
     unique = list({f"{e['tp']}_{e['id']}": e for e in items}.values())
     with ThreadPoolExecutor(max_workers=10) as ex:
-        for key, name in ex.map(get_creator, unique):
+        for key, name, price in ex.map(get_details, unique):
             if key not in result:
-                result[key] = {"thumb": "", "creator": ""}
+                result[key] = {"thumb": "", "creator": "", "price": 0}
             result[key]["creator"] = name
+            if price:
+                result[key]["price"] = price
 
     return result
 
@@ -295,7 +301,7 @@ async function search(){
     document.getElementById('statsRow').style.display='flex'
     document.getElementById('tbody').innerHTML=items.map(e=>{
       const isB=e.tp==='B',{date,time}=fmtParts(e.ts)
-      return `<tr><td><img class="thumb" data-id="${e.id}" data-tp="${e.tp}" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></td><td class="item-name">${e.n||'ID:'+e.id}</td><td><span class="creator" data-id="${e.id}" data-tp="${e.tp}">...</span></td><td class="price">${e.p?'R$ '+e.p:'ฟรี'}</td><td><span class="badge ${isB?'bb':'ba'}">${isB?'Bundle':'Asset'}</span></td><td><div class="date-cell">${date}</div></td><td><div class="time-cell">${time}</div></td></tr>`
+      return `<tr><td><img class="thumb" data-id="${e.id}" data-tp="${e.tp}" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></td><td class="item-name">${e.n||'ID:'+e.id}</td><td><span class="creator" data-id="${e.id}" data-tp="${e.tp}">${e.cr||'...'}</span></td><td class="price" data-id="${e.id}" data-tp="${e.tp}">${e.p?'R$ '+e.p:'ฟรี'}</td><td><span class="badge ${isB?'bb':'ba'}">${isB?'Bundle':'Asset'}</span></td><td><div class="date-cell">${date}</div></td><td><div class="time-cell">${time}</div></td></tr>`
     }).join('')
     document.getElementById('tbl').style.display='table'
     loadItemDetails(items)
@@ -318,7 +324,14 @@ async function loadItemDetails(items){
     })
     document.querySelectorAll('span.creator').forEach(el=>{
       const key=`${el.dataset.tp}_${el.dataset.id}`
-      el.textContent=map[key]?.creator||'—'
+      const c=map[key]?.creator
+      if(c) el.textContent=c
+      else if(el.textContent==='...') el.textContent='—'
+    })
+    document.querySelectorAll('td.price[data-id]').forEach(el=>{
+      const key=`${el.dataset.tp}_${el.dataset.id}`
+      const p=map[key]?.price
+      if(p) el.textContent='R$ '+p
     })
   }catch{}
 }

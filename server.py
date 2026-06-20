@@ -554,8 +554,12 @@ class Handler(BaseHTTPRequestHandler):
         to_s   = (p.get("to")   or [""])[0]
         from_ts = float(from_s) if from_s else None
         to_ts   = float(to_s)   if to_s   else None
-        entries = fetch_all_history(from_ts, to_ts)
-        self._json(200, {"entries": entries, "total": len(entries)})
+        try:
+            entries = fetch_all_history(from_ts, to_ts)
+            self._json(200, {"entries": entries, "total": len(entries)})
+        except Exception as e:
+            print(f"[all-history error] {e}")
+            self._json(500, {"message": str(e)})
 
     def _json(self, code, data):
         b = json.dumps(data, ensure_ascii=False).encode()

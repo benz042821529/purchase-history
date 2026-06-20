@@ -107,12 +107,37 @@ def fetch_item_details(items):
                 creator = d.get("creator", {}).get("name", "")
                 price   = d.get("product", {}).get("priceInRobux") or 0
                 return f"B_{iid}", iname, creator, price
-            else:
-                d = roblox_public(f"https://economy.roblox.com/v1/assets/{iid}/details")
+
+            # Asset: economy API first, fallback to catalog API for UGC items
+            iname, creator, price = "", "", 0
+            try:
+                d       = roblox_public(f"https://economy.roblox.com/v1/assets/{iid}/details")
                 iname   = d.get("Name", "")
                 creator = d.get("Creator", {}).get("Name", "")
                 price   = d.get("PriceInRobux") or 0
-                return f"A_{iid}", iname, creator, price
+            except Exception as e:
+                print(f"[economy {iid}] {e}")
+
+            if not iname or not creator or not price:
+                try:
+                    body = json.dumps({"items": [{"itemType": "Asset", "id": iid}]}).encode()
+                    req  = urllib.request.Request(
+                        "https://catalog.roblox.com/v1/catalog/items/details",
+                        data=body,
+                        headers={"Content-Type": "application/json", "User-Agent": UA},
+                        method="POST"
+                    )
+                    with urllib.request.urlopen(req, timeout=10) as r:
+                        ci_list = json.loads(r.read().decode()).get("data", [])
+                        if ci_list:
+                            ci = ci_list[0]
+                            if not iname:   iname   = ci.get("name", "")
+                            if not creator: creator = ci.get("creatorName", "")
+                            if not price:   price   = ci.get("price") or 0
+                except Exception as e:
+                    print(f"[catalog fallback {iid}] {e}")
+
+            return f"A_{iid}", iname, creator, price
         except Exception as e:
             print(f"[details {tp}_{iid}] {e}")
             return f"{tp}_{iid}", "", "", 0

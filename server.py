@@ -131,6 +131,77 @@ def fetch_item_details(items):
 
     return result
 
+
+def list_all_keys():
+    keys = []
+    cursor = None
+    while True:
+        params = {"datastoreName": DS_NAME, "limit": 100, "prefix": "P_"}
+        if cursor:
+            params["cursor"] = cursor
+        try:
+            data = roblox_get(f"{BASE}/standard-datastores/datastore/entries", params)
+            keys.extend([k["key"] for k in data.get("keys", [])])
+            cursor = data.get("nextPageCursor")
+            if not cursor:
+                break
+        except Exception as e:
+            print(f"[list_keys] {e}")
+            break
+    return keys
+
+
+def batch_usernames(uids):
+    result = {}
+    for i in range(0, len(uids), 100):
+        batch = uids[i:i+100]
+        try:
+            body = json.dumps({"userIds": batch, "excludeBannedUsers": False}).encode()
+            req  = urllib.request.Request(
+                "https://users.roblox.com/v1/users",
+                data=body, headers={"Content-Type": "application/json"}, method="POST"
+            )
+            with urllib.request.urlopen(req, timeout=10) as r:
+                data = json.loads(r.read().decode())
+                for u in data.get("data", []):
+                    result[u["id"]] = u["name"]
+        except Exception as e:
+            print(f"[batch_usernames] {e}")
+    return result
+
+
+def fetch_all_history(from_ts=None, to_ts=None):
+    keys = list_all_keys()
+
+    def fetch_for_key(key):
+        if not key.startswith("P_"):
+            return []
+        try:
+            uid = int(key[2:])
+        except:
+            return []
+        entries = fetch_history(uid, from_ts, to_ts)
+        if not entries:
+            return []
+        for e in entries:
+            e["uid"] = uid
+        return entries
+
+    all_entries = []
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        for result in ex.map(fetch_for_key, keys):
+            if result:
+                all_entries.extend(result)
+
+    uids = list({e["uid"] for e in all_entries})
+    uid_names = batch_usernames(uids)
+    for e in all_entries:
+        e["username"] = uid_names.get(e["uid"], str(e["uid"]))
+
+    all_entries.sort(key=lambda x: x["ts"], reverse=True)
+    return all_entries
+
+
 HTML = """<!DOCTYPE html>
 <html lang="th">
 <head>
@@ -182,6 +253,7 @@ td:last-child{border-right:1px solid #f0f2f7;border-radius:0 10px 10px 0}
 .date-cell{color:#1a1a2e;font-size:13px;font-weight:500}
 .creator{color:#888;font-size:12px}
 .time-cell{color:#aaa;font-size:12px;margin-top:2px}
+.player-col{color:#4f8ef7;font-size:12px;font-weight:600}
 
 /* Login overlay */
 #loginOverlay{position:fixed;inset:0;background:#f0f2f7;display:flex;align-items:center;justify-content:center;z-index:999}
@@ -239,7 +311,7 @@ td:last-child{border-right:1px solid #f0f2f7;border-radius:0 10px 10px 0}
 </div>
 <div class="tbl-wrap">
   <table id="tbl" style="display:none">
-    <thead><tr><th style="width:66px"></th><th>สินค้า</th><th>ผู้สร้าง</th><th>ราคา</th><th>ประเภท</th><th>วันที่</th><th>เวลา</th></tr></thead>
+    <thead><tr><th style="width:66px"></th><th>ผู้เล่น</th><th>สินค้า</th><th>ผู้สร้าง</th><th>ราคา</th><th>ประเภท</th><th>วันที่</th><th>เวลา</th></tr></thead>
     <tbody id="tbody"></tbody>
   </table>
 </div>
@@ -264,7 +336,7 @@ function dateToTs(s,end=false){
 async function doLogin(){
   const pw=document.getElementById('pwInput').value
   const res=await fetch('/api/auth',{headers:{'X-Password':pw}})
-  if(res.ok){_pw=pw;document.getElementById('loginOverlay').style.display='none'}
+  if(res.ok){_pw=pw;document.getElementById('loginOverlay').style.display='none';loadAll()}
   else{document.getElementById('loginErr').textContent='รหัสผ่านไม่ถูกต้อง'}
 }
 
@@ -278,9 +350,43 @@ function quickFilter(days){
   document.getElementById('toDate').value=toISO(Math.floor(now.getTime()/1000))
 }
 
+function renderRows(items, defaultUsername){
+  return items.map(e=>{
+    const isB=e.tp==='B',{date,time}=fmtParts(e.ts)
+    const player=e.username||defaultUsername||''
+    return `<tr><td><img class="thumb" data-id="${e.id}" data-tp="${e.tp}" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></td><td class="player-col">${player}</td><td class="item-name" data-id="${e.id}" data-tp="${e.tp}">${e.n||'ID:'+e.id}</td><td><span class="creator" data-id="${e.id}" data-tp="${e.tp}">${e.cr||'...'}</span></td><td class="price" data-id="${e.id}" data-tp="${e.tp}">${e.p?'R$ '+e.p:'ฟรี'}</td><td><span class="badge ${isB?'bb':'ba'}">${isB?'Bundle':'Asset'}</span></td><td><div class="date-cell">${date}</div></td><td><div class="time-cell">${time}</div></td></tr>`
+  }).join('')
+}
+
+async function loadAll(){
+  const status=document.getElementById('status')
+  status.className='status';status.textContent='กำลังโหลดรายการทั้งหมด...'
+  document.getElementById('playerInfo').textContent=''
+  document.getElementById('statsRow').style.display='none'
+  document.getElementById('tbl').style.display='none'
+  document.getElementById('tbody').innerHTML=''
+  const from=dateToTs(document.getElementById('fromDate').value,false)
+  const to=dateToTs(document.getElementById('toDate').value,true)
+  const params=new URLSearchParams({from:from||'',to:to||''})
+  try{
+    const res=await fetch('/api/all-history?'+params,{headers:{'X-Password':_pw}})
+    const data=await res.json()
+    if(!res.ok){status.className='status err';status.textContent='Error: '+(data.message||res.status);return}
+    const items=data.entries||[]
+    if(!items.length){status.className='status';status.textContent='ไม่มีประวัติการซื้อ';return}
+    status.className='status ok';status.textContent=`ทั้งหมด ${items.length} รายการจากทุกผู้เล่น`
+    document.getElementById('sTotal').textContent=items.length.toLocaleString()
+    document.getElementById('sRevenue').textContent='R$ '+items.reduce((s,e)=>s+(e.p||0),0).toLocaleString()
+    document.getElementById('statsRow').style.display='flex'
+    document.getElementById('tbody').innerHTML=renderRows(items,'')
+    document.getElementById('tbl').style.display='table'
+    loadThumbnails(items)
+  }catch(e){status.className='status err';status.textContent='เกิดข้อผิดพลาด: '+e.message}
+}
+
 async function search(){
   const q=document.getElementById('query').value.trim()
-  if(!q)return
+  if(!q){loadAll();return}
   const btn=document.getElementById('searchBtn')
   const status=document.getElementById('status')
   btn.disabled=true;status.className='status';status.textContent='กำลังค้นหา...'
@@ -304,10 +410,7 @@ async function search(){
     document.getElementById('sTotal').textContent=items.length.toLocaleString()
     document.getElementById('sRevenue').textContent='R$ '+items.reduce((s,e)=>s+(e.p||0),0).toLocaleString()
     document.getElementById('statsRow').style.display='flex'
-    document.getElementById('tbody').innerHTML=items.map(e=>{
-      const isB=e.tp==='B',{date,time}=fmtParts(e.ts)
-      return `<tr><td><img class="thumb" data-id="${e.id}" data-tp="${e.tp}" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></td><td class="item-name" data-id="${e.id}" data-tp="${e.tp}">${e.n||'ID:'+e.id}</td><td><span class="creator" data-id="${e.id}" data-tp="${e.tp}">${e.cr||'...'}</span></td><td class="price" data-id="${e.id}" data-tp="${e.tp}">${e.p?'R$ '+e.p:'ฟรี'}</td><td><span class="badge ${isB?'bb':'ba'}">${isB?'Bundle':'Asset'}</span></td><td><div class="date-cell">${date}</div></td><td><div class="time-cell">${time}</div></td></tr>`
-    }).join('')
+    document.getElementById('tbody').innerHTML=renderRows(items,data.username)
     document.getElementById('tbl').style.display='table'
     loadThumbnails(items)
   }catch(e){status.className='status err';status.textContent='เกิดข้อผิดพลาด: '+e.message}
@@ -408,6 +511,10 @@ class Handler(BaseHTTPRequestHandler):
             if not self._check_auth():
                 self._json(401, {"message": "Unauthorized"}); return
             self._api(parsed.query)
+        elif parsed.path == "/api/all-history":
+            if not self._check_auth():
+                self._json(401, {"message": "Unauthorized"}); return
+            self._api_all(parsed.query)
         else:
             b = HTML.encode()
             self.send_response(200)
@@ -440,6 +547,15 @@ class Handler(BaseHTTPRequestHandler):
             self._json(500, {"message": "DataStore error"}); return
 
         self._json(200, {"userId": uid, "username": username, "entries": entries})
+
+    def _api_all(self, qs):
+        p      = urllib.parse.parse_qs(qs)
+        from_s = (p.get("from") or [""])[0]
+        to_s   = (p.get("to")   or [""])[0]
+        from_ts = float(from_s) if from_s else None
+        to_ts   = float(to_s)   if to_s   else None
+        entries = fetch_all_history(from_ts, to_ts)
+        self._json(200, {"entries": entries, "total": len(entries)})
 
     def _json(self, code, data):
         b = json.dumps(data, ensure_ascii=False).encode()

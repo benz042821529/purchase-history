@@ -514,17 +514,27 @@ class Handler(BaseHTTPRequestHandler):
             iid = int((p.get("id") or ["0"])[0])
             tp  = (p.get("tp") or ["A"])[0]
             out = {}
+            # Economy API
             try:
-                if tp == "B":
-                    url = f"https://catalog.roblox.com/v1/bundles/{iid}/details"
-                    d   = roblox_public(url)
-                    out = {"url": url, "creator": d.get("creator", {}), "raw_keys": list(d.keys())}
-                else:
-                    url = f"https://economy.roblox.com/v1/assets/{iid}/details"
-                    d   = roblox_public(url)
-                    out = {"url": url, "Creator": d.get("Creator", {}), "raw_keys": list(d.keys())}
+                url = f"https://economy.roblox.com/v1/assets/{iid}/details"
+                d   = roblox_public(url)
+                out["economy"] = {"ok": True, "Name": d.get("Name"), "PriceInRobux": d.get("PriceInRobux"), "Creator": d.get("Creator")}
             except Exception as e:
-                out = {"error": str(e)}
+                out["economy"] = {"ok": False, "error": str(e)}
+            # Catalog items API
+            try:
+                import json as _j
+                body = _j.dumps({"items": [{"itemType": "Bundle" if tp == "B" else "Asset", "id": iid}]}).encode()
+                req  = urllib.request.Request(
+                    "https://catalog.roblox.com/v1/catalog/items/details",
+                    data=body, headers={"Content-Type": "application/json", "User-Agent": UA}, method="POST"
+                )
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    cd = json.loads(r.read().decode())
+                    ci = (cd.get("data") or [None])[0]
+                    out["catalog"] = {"ok": True, "name": ci.get("name") if ci else None, "price": ci.get("price") if ci else None, "creatorName": ci.get("creatorName") if ci else None}
+            except Exception as e:
+                out["catalog"] = {"ok": False, "error": str(e)}
             self._json(200, out)
             return
         if parsed.path == "/api/auth":

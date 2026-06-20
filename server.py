@@ -62,6 +62,32 @@ def fetch_history(uid, from_ts=None, to_ts=None):
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
 
+_catalog_csrf = ""
+
+def catalog_item_detail(iid, tp):
+    global _catalog_csrf
+    item_type = "Bundle" if tp == "B" else "Asset"
+    body = json.dumps({"items": [{"itemType": item_type, "id": iid}]}).encode()
+    url  = "https://catalog.roblox.com/v1/catalog/items/details"
+    for attempt in range(2):
+        headers = {"Content-Type": "application/json", "User-Agent": UA}
+        if _catalog_csrf:
+            headers["X-CSRF-Token"] = _catalog_csrf
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                items = json.loads(r.read().decode()).get("data", [])
+                return items[0] if items else None
+        except urllib.error.HTTPError as e:
+            token = e.headers.get("x-csrf-token")
+            if token:
+                _catalog_csrf = token
+            if attempt == 0:
+                continue
+        except Exception:
+            break
+    return None
+
 def roblox_public(url, data=None, method="GET"):
     headers = {"User-Agent": UA}
     if data:
@@ -97,18 +123,17 @@ def fetch_item_details(items):
         except Exception as e:
             print(f"[thumb bundle] {e}")
 
-    # Creator names + price + item name — GET endpoints (no CSRF needed)
+    # Creator names + price + item name
     def get_details(item):
         iid, tp = item["id"], item["tp"]
         try:
             if tp == "B":
-                d = roblox_public(f"https://catalog.roblox.com/v1/bundles/{iid}/details")
-                iname   = d.get("name", "")
-                creator = d.get("creator", {}).get("name", "")
-                price   = d.get("product", {}).get("priceInRobux") or 0
-                return f"B_{iid}", iname, creator, price
+                ci = catalog_item_detail(iid, "B")
+                if ci:
+                    return f"B_{iid}", ci.get("name", ""), ci.get("creatorName", ""), ci.get("price") or 0
+                return f"B_{iid}", "", "", 0
 
-            # Asset: economy API first, fallback to catalog API for UGC items
+            # Asset: economy API first, fallback to catalog API
             iname, creator, price = "", "", 0
             try:
                 d       = roblox_public(f"https://economy.roblox.com/v1/assets/{iid}/details")
@@ -119,23 +144,11 @@ def fetch_item_details(items):
                 print(f"[economy {iid}] {e}")
 
             if not iname or not creator or not price:
-                try:
-                    body = json.dumps({"items": [{"itemType": "Asset", "id": iid}]}).encode()
-                    req  = urllib.request.Request(
-                        "https://catalog.roblox.com/v1/catalog/items/details",
-                        data=body,
-                        headers={"Content-Type": "application/json", "User-Agent": UA},
-                        method="POST"
-                    )
-                    with urllib.request.urlopen(req, timeout=10) as r:
-                        ci_list = json.loads(r.read().decode()).get("data", [])
-                        if ci_list:
-                            ci = ci_list[0]
-                            if not iname:   iname   = ci.get("name", "")
-                            if not creator: creator = ci.get("creatorName", "")
-                            if not price:   price   = ci.get("price") or 0
-                except Exception as e:
-                    print(f"[catalog fallback {iid}] {e}")
+                ci = catalog_item_detail(iid, "A")
+                if ci:
+                    if not iname:   iname   = ci.get("name", "")
+                    if not creator: creator = ci.get("creatorName", "")
+                    if not price:   price   = ci.get("price") or 0
 
             return f"A_{iid}", iname, creator, price
         except Exception as e:
@@ -521,18 +534,13 @@ class Handler(BaseHTTPRequestHandler):
                 out["economy"] = {"ok": True, "Name": d.get("Name"), "PriceInRobux": d.get("PriceInRobux"), "Creator": d.get("Creator")}
             except Exception as e:
                 out["economy"] = {"ok": False, "error": str(e)}
-            # Catalog items API
+            # Catalog items API (with CSRF)
             try:
-                import json as _j
-                body = _j.dumps({"items": [{"itemType": "Bundle" if tp == "B" else "Asset", "id": iid}]}).encode()
-                req  = urllib.request.Request(
-                    "https://catalog.roblox.com/v1/catalog/items/details",
-                    data=body, headers={"Content-Type": "application/json", "User-Agent": UA}, method="POST"
-                )
-                with urllib.request.urlopen(req, timeout=10) as r:
-                    cd = json.loads(r.read().decode())
-                    ci = (cd.get("data") or [None])[0]
-                    out["catalog"] = {"ok": True, "name": ci.get("name") if ci else None, "price": ci.get("price") if ci else None, "creatorName": ci.get("creatorName") if ci else None}
+                ci = catalog_item_detail(iid, tp)
+                if ci:
+                    out["catalog"] = {"ok": True, "name": ci.get("name"), "price": ci.get("price"), "creatorName": ci.get("creatorName")}
+                else:
+                    out["catalog"] = {"ok": False, "error": "no data returned"}
             except Exception as e:
                 out["catalog"] = {"ok": False, "error": str(e)}
             self._json(200, out)

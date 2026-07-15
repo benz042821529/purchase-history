@@ -136,10 +136,11 @@ def fetch_item_details(items):
             # Asset: economy API first, fallback to catalog API
             iname, creator, price = "", "", 0
             try:
-                d       = roblox_public(f"https://economy.roblox.com/v1/assets/{iid}/details")
-                iname   = d.get("Name", "")
-                creator = d.get("Creator", {}).get("Name", "")
-                price   = d.get("PriceInRobux") or 0
+                d = roblox_public(f"https://economy.roblox.com/v1/assets/{iid}/details")
+                if "errors" not in d:
+                    iname   = d.get("Name", "")
+                    creator = d.get("Creator", {}).get("Name", "")
+                    price   = d.get("PriceInRobux") or 0
             except Exception as e:
                 print(f"[economy {iid}] {e}")
 

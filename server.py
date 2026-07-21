@@ -82,6 +82,10 @@ def fetch_history(uid, from_ts=None, to_ts=None):
 
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
 
+class RateLimited(Exception):
+    """โดน 429 — พลาดชั่วคราว ควรลองใหม่ (ไม่ใช่ข้อมูลไม่มีจริง)"""
+    pass
+
 _catalog_csrf = ""
 _catalog_csrf_lock = threading.Lock()
 
@@ -90,6 +94,7 @@ def catalog_item_detail(iid, tp):
     item_type = "Bundle" if tp == "B" else "Asset"
     body = json.dumps({"items": [{"itemType": item_type, "id": iid}]}).encode()
     url  = "https://catalog.roblox.com/v1/catalog/items/details"
+    rate_limited = False
     for attempt in range(2):
         headers = {"Content-Type": "application/json", "User-Agent": UA}
         with _catalog_csrf_lock:
@@ -101,15 +106,19 @@ def catalog_item_detail(iid, tp):
                 items = json.loads(r.read().decode()).get("data", [])
                 return items[0] if items else None
         except urllib.error.HTTPError as e:
+            if e.code == 429:
+                rate_limited = True
             token = e.headers.get("x-csrf-token")
             if token:
                 with _catalog_csrf_lock:
                     _catalog_csrf = token
-            if attempt == 0:
+            if attempt == 0 and (token or e.code == 429):
                 continue
         except Exception as e:
             print(f"[catalog {tp}_{iid}] {e}")
             break
+    if rate_limited:
+        raise RateLimited()
     return None
 
 def roblox_public(url, data=None, method="GET"):
@@ -117,14 +126,15 @@ def roblox_public(url, data=None, method="GET"):
     if data:
         headers["Content-Type"] = "application/json"
     req = urllib.request.Request(url, data=data, headers=headers, method=method)
-    with urllib.request.urlopen(req, timeout=10) as r:
-        return json.loads(r.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        if e.code == 429:
+            raise RateLimited()
+        raise
 
 def fetch_item_details(items):
-    ck = ("items", tuple(sorted({f"{e['tp']}_{e['id']}" for e in items})))
-    cached = cache_get(ck, 3600)
-    if cached is not None:
-        return cached
     result = {}
     assets  = [e["id"] for e in items if e["tp"] != "B"]
     bundles = [e["id"] for e in items if e["tp"] == "B"]
@@ -152,50 +162,99 @@ def fetch_item_details(items):
             print(f"[thumb bundle] {e}")
 
     # Creator names + price + item name
+    # คืน (key, data, transient):
+    #   data = {"name","creator","price"} เมื่อได้ข้อมูล (หรือยืนยันว่าไม่มีราคาจริง เช่นปิดขาย)
+    #   data = None + transient=True  → โดน 429 พลาดชั่วคราว ควรลองใหม่
+    #   data = None + transient=False → ไม่มีข้อมูลจริง (ถูกลบ/ปิดขาย) เลิกลอง
     def get_details(item):
         iid, tp = item["id"], item["tp"]
+        key = f"{tp}_{iid}"
         try:
             if tp == "B":
-                ci = catalog_item_detail(iid, "B")
+                try:
+                    ci = catalog_item_detail(iid, "B")
+                except RateLimited:
+                    return key, None, True
                 if ci:
-                    return f"B_{iid}", ci.get("name", ""), ci.get("creatorName", ""), ci.get("price") or 0
-                return f"B_{iid}", "", "", 0
+                    return key, {"name": ci.get("name", ""), "creator": ci.get("creatorName", ""), "price": ci.get("price") or 0}, False
+                return key, None, False
 
             # Asset: economy API first, fallback to catalog API
             iname, creator, price = "", "", 0
+            transient = False
             try:
                 d = roblox_public(f"https://economy.roblox.com/v1/assets/{iid}/details")
                 if "errors" not in d:
                     iname   = d.get("Name", "")
                     creator = d.get("Creator", {}).get("Name", "")
                     price   = d.get("PriceInRobux") or 0
+            except RateLimited:
+                transient = True
             except Exception as e:
                 print(f"[economy {iid}] {e}")
 
             if not iname or not creator or not price:
-                ci = catalog_item_detail(iid, "A")
-                if ci:
-                    if not iname:   iname   = ci.get("name", "")
-                    if not creator: creator = ci.get("creatorName", "")
-                    if not price:   price   = ci.get("price") or 0
+                try:
+                    ci = catalog_item_detail(iid, "A")
+                    if ci:
+                        if not iname:   iname   = ci.get("name", "")
+                        if not creator: creator = ci.get("creatorName", "")
+                        if not price:   price   = ci.get("price") or 0
+                except RateLimited:
+                    transient = True
+                except Exception as e:
+                    print(f"[catalog {iid}] {e}")
 
-            return f"A_{iid}", iname, creator, price
+            if iname or creator or price:
+                return key, {"name": iname, "creator": creator, "price": price}, False
+            return key, None, transient
         except Exception as e:
             print(f"[details {tp}_{iid}] {e}")
-            return f"{tp}_{iid}", "", "", 0
+            return key, None, True
 
     unique = list({f"{e['tp']}_{e['id']}": e for e in items}.values())
-    with ThreadPoolExecutor(max_workers=10) as ex:
-        for key, iname, creator, price in ex.map(get_details, unique):
-            if key not in result:
-                result[key] = {"thumb": "", "name": "", "creator": "", "price": 0}
-            if iname:
-                result[key]["name"] = iname
-            result[key]["creator"] = creator
-            if price:
-                result[key]["price"] = price
 
-    cache_set(ck, result)
+    # ให้ทุก key มีที่อยู่ก่อน + ดึงจาก cache รายชิ้น (เก็บเฉพาะที่เคยสำเร็จ)
+    pending = {}
+    for it in unique:
+        key = f"{it['tp']}_{it['id']}"
+        if key not in result:
+            result[key] = {"thumb": "", "name": "", "creator": "", "price": 0}
+        cached = cache_get(("item", key), 3600)
+        if cached is not None:
+            if cached["name"]:  result[key]["name"] = cached["name"]
+            result[key]["creator"] = cached["creator"]
+            if cached["price"]: result[key]["price"] = cached["price"]
+        else:
+            pending[key] = it
+
+    # retry จนครบ: ลองซ้ำเฉพาะอันที่โดน 429 พร้อม backoff, หยุดเมื่อครบหรือครบ 6 รอบ
+    MAX_ROUNDS = 6
+    for rnd in range(MAX_ROUNDS):
+        if not pending:
+            break
+        retry_next = {}
+        with ThreadPoolExecutor(max_workers=4) as ex:
+            for key, data, transient in ex.map(get_details, list(pending.values())):
+                if data is not None:
+                    if data["name"]:
+                        result[key]["name"] = data["name"]
+                    result[key]["creator"] = data["creator"]
+                    if data["price"]:
+                        result[key]["price"] = data["price"]
+                    cache_set(("item", key), data)
+                elif transient:
+                    retry_next[key] = pending[key]
+                # ไม่มีข้อมูลจริง → ปล่อยไว้ ไม่ลองซ้ำ
+        pending = retry_next
+        if pending and rnd < MAX_ROUNDS - 1:
+            wait = min(2 ** rnd, 8)
+            print(f"[item-details] เหลือ {len(pending)} ชิ้นโดน rate limit — รอ {wait}s แล้วลองใหม่ (รอบ {rnd+2})")
+            time.sleep(wait)
+
+    if pending:
+        print(f"[item-details] ยังเหลือ {len(pending)} ชิ้นดึงไม่ครบหลัง {MAX_ROUNDS} รอบ")
+
     return result
 
 

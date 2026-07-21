@@ -134,92 +134,105 @@ def roblox_public(url, data=None, method="GET"):
             raise RateLimited()
         raise
 
+def _thumb_batch(ids, kind):
+    """ดึง thumbnail เป็นชุด → {id: url} เฉพาะที่ state=Completed. kind = 'asset' | 'bundle'"""
+    out = {}
+    if kind == "asset":
+        base = "https://thumbnails.roblox.com/v1/assets?assetIds={}&size=150x150&format=Png"
+    else:
+        base = "https://thumbnails.roblox.com/v1/bundles/thumbnails?bundleIds={}&size=150x150&format=Png"
+    for i in range(0, len(ids), 100):
+        chunk = ",".join(str(x) for x in ids[i:i+100])
+        try:
+            d = roblox_public(base.format(chunk))
+            for x in d.get("data", []):
+                if x.get("state") == "Completed" and x.get("imageUrl"):
+                    out[x["targetId"]] = x["imageUrl"]
+        except Exception as e:
+            print(f"[thumb {kind}] {e}")
+    return out
+
+
+def _asset_details(iid):
+    """ดึงแบบ Asset (economy v2 → fallback catalog) → (name, creator, price). อาจ raise RateLimited"""
+    name, creator, price = "", "", 0
+    # v2 รองรับทั้ง asset ปกติและ Collectible (UGC limited) — v1 ดึง collectible ไม่ได้
+    d = roblox_public(f"https://economy.roblox.com/v2/assets/{iid}/details")
+    if "errors" not in d:
+        name    = d.get("Name", "")
+        creator = d.get("Creator", {}).get("Name", "")
+        price   = d.get("PriceInRobux") or 0
+    if not name or not creator or not price:
+        ci = catalog_item_detail(iid, "A")
+        if ci:
+            name    = name    or ci.get("name", "")
+            creator = creator or ci.get("creatorName", "")
+            price   = price   or (ci.get("price") or 0)
+    return name, creator, price
+
+
+def _bundle_details(iid):
+    """ดึงแบบ Bundle (catalog) → (name, creator, price). อาจ raise RateLimited"""
+    ci = catalog_item_detail(iid, "B")
+    if ci:
+        return ci.get("name", ""), ci.get("creatorName", ""), ci.get("price") or 0
+    return "", "", 0
+
+
 def fetch_item_details(items):
     result = {}
-    assets  = [e["id"] for e in items if e["tp"] != "B"]
-    bundles = [e["id"] for e in items if e["tp"] == "B"]
+    unique = list({f"{e['tp']}_{e['id']}": e for e in items}.values())
+    assets  = [e["id"] for e in unique if e["tp"] != "B"]
+    bundles = [e["id"] for e in unique if e["tp"] == "B"]
+    all_ids = [e["id"] for e in unique]
 
-    # Thumbnails — assets
-    for i in range(0, len(assets), 100):
-        ids = ",".join(str(x) for x in assets[i:i+100])
-        try:
-            d = roblox_public(f"https://thumbnails.roblox.com/v1/assets?assetIds={ids}&size=150x150&format=Png")
-            for x in d.get("data", []):
-                if x.get("state") == "Completed":
-                    result[f"A_{x['targetId']}"] = {"thumb": x["imageUrl"], "creator": ""}
-        except Exception as e:
-            print(f"[thumb asset] {e}")
+    # Thumbnails — ลองตามชนิดที่ log ไว้ก่อน แล้ว cross-type สำหรับตัวที่ยังไม่ได้ (log ผิดชนิด)
+    thumb_map = {}
+    thumb_map.update(_thumb_batch(assets, "asset"))
+    thumb_map.update(_thumb_batch(bundles, "bundle"))
+    missing = [i for i in all_ids if i not in thumb_map]
+    if missing:
+        thumb_map.update(_thumb_batch(missing, "bundle"))
+        missing = [i for i in all_ids if i not in thumb_map]
+    if missing:
+        thumb_map.update(_thumb_batch(missing, "asset"))
 
-    # Thumbnails — bundles
-    for i in range(0, len(bundles), 100):
-        ids = ",".join(str(x) for x in bundles[i:i+100])
-        try:
-            d = roblox_public(f"https://thumbnails.roblox.com/v1/bundles/thumbnails?bundleIds={ids}&size=150x150&format=Png")
-            for x in d.get("data", []):
-                if x.get("state") == "Completed":
-                    result[f"B_{x['targetId']}"] = {"thumb": x["imageUrl"], "creator": ""}
-        except Exception as e:
-            print(f"[thumb bundle] {e}")
-
-    # Creator names + price + item name
+    # Creator names + price + item name (ลองทั้ง Asset และ Bundle ไม่ว่า log จะบอกชนิดไหน)
     # คืน (key, data, transient):
-    #   data = {"name","creator","price"} เมื่อได้ข้อมูล (หรือยืนยันว่าไม่มีราคาจริง เช่นปิดขาย)
+    #   data = {"name","creator","price"} เมื่อได้ข้อมูล
     #   data = None + transient=True  → โดน 429 พลาดชั่วคราว ควรลองใหม่
-    #   data = None + transient=False → ไม่มีข้อมูลจริง (ถูกลบ/ปิดขาย) เลิกลอง
+    #   data = None + transient=False → ไม่มีข้อมูลจริง (ถูกลบ) เลิกลอง
     def get_details(item):
         iid, tp = item["id"], item["tp"]
         key = f"{tp}_{iid}"
-        try:
-            if tp == "B":
-                try:
-                    ci = catalog_item_detail(iid, "B")
-                except RateLimited:
-                    return key, None, True
-                if ci:
-                    return key, {"name": ci.get("name", ""), "creator": ci.get("creatorName", ""), "price": ci.get("price") or 0}, False
-                return key, None, False
-
-            # Asset: economy API first, fallback to catalog API
-            iname, creator, price = "", "", 0
-            transient = False
+        # ลองชนิดที่ log ไว้ก่อน ถ้าไม่เจอค่อยลองอีกชนิด (กัน tp ที่ log มาผิด)
+        order = ["B", "A"] if tp == "B" else ["A", "B"]
+        name = creator = ""
+        price = 0
+        transient = False
+        for kind in order:
             try:
-                d = roblox_public(f"https://economy.roblox.com/v1/assets/{iid}/details")
-                if "errors" not in d:
-                    iname   = d.get("Name", "")
-                    creator = d.get("Creator", {}).get("Name", "")
-                    price   = d.get("PriceInRobux") or 0
+                n, c, p = _asset_details(iid) if kind == "A" else _bundle_details(iid)
             except RateLimited:
                 transient = True
+                continue
             except Exception as e:
-                print(f"[economy {iid}] {e}")
+                print(f"[details {kind}_{iid}] {e}")
+                continue
+            name    = name    or n
+            creator = creator or c
+            price   = price   or p
+            if name:   # เจอชนิดที่ถูกแล้ว (มีชื่อ) ไม่ต้องลองอีกชนิด
+                break
+        if name or creator or price:
+            return key, {"name": name, "creator": creator, "price": price}, False
+        return key, None, transient
 
-            if not iname or not creator or not price:
-                try:
-                    ci = catalog_item_detail(iid, "A")
-                    if ci:
-                        if not iname:   iname   = ci.get("name", "")
-                        if not creator: creator = ci.get("creatorName", "")
-                        if not price:   price   = ci.get("price") or 0
-                except RateLimited:
-                    transient = True
-                except Exception as e:
-                    print(f"[catalog {iid}] {e}")
-
-            if iname or creator or price:
-                return key, {"name": iname, "creator": creator, "price": price}, False
-            return key, None, transient
-        except Exception as e:
-            print(f"[details {tp}_{iid}] {e}")
-            return key, None, True
-
-    unique = list({f"{e['tp']}_{e['id']}": e for e in items}.values())
-
-    # ให้ทุก key มีที่อยู่ก่อน + ดึงจาก cache รายชิ้น (เก็บเฉพาะที่เคยสำเร็จ)
+    # ให้ทุก key มีที่อยู่ก่อน + ใส่ thumbnail + ดึงจาก cache รายชิ้น (เก็บเฉพาะที่เคยสำเร็จ)
     pending = {}
     for it in unique:
         key = f"{it['tp']}_{it['id']}"
-        if key not in result:
-            result[key] = {"thumb": "", "name": "", "creator": "", "price": 0}
+        result[key] = {"thumb": thumb_map.get(it["id"], ""), "name": "", "creator": "", "price": 0}
         cached = cache_get(("item", key), 3600)
         if cached is not None:
             if cached["name"]:  result[key]["name"] = cached["name"]
@@ -623,7 +636,7 @@ class Handler(BaseHTTPRequestHandler):
             out = {}
             # Economy API
             try:
-                url = f"https://economy.roblox.com/v1/assets/{iid}/details"
+                url = f"https://economy.roblox.com/v2/assets/{iid}/details"
                 d   = roblox_public(url)
                 out["economy"] = {"ok": True, "Name": d.get("Name"), "PriceInRobux": d.get("PriceInRobux"), "Creator": d.get("Creator")}
             except Exception as e:

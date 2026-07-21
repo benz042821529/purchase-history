@@ -1,0 +1,10 @@
+# Python
+__pycache__/
+*.pyc
+
+# Local backups
+server.py.bak.*
+*.bak
+
+# Env
+.env

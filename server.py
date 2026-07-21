@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, json, time
+import os, json, time, threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.request, urllib.parse, urllib.error
 from concurrent.futures import ThreadPoolExecutor
@@ -11,6 +11,21 @@ PORT        = int(os.environ.get("PORT", 8080))
 
 BASE    = f"https://apis.roblox.com/datastores/v1/universes/{UNIVERSE_ID}"
 DS_NAME = "PurchaseLog_v1"
+
+# --- simple in-memory TTL cache ---
+_cache = {}
+_cache_lock = threading.Lock()
+
+def cache_get(key, ttl):
+    with _cache_lock:
+        entry = _cache.get(key)
+        if entry and time.time() - entry[0] < ttl:
+            return entry[1]
+    return None
+
+def cache_set(key, value):
+    with _cache_lock:
+        _cache[key] = (time.time(), value)
 
 def roblox_get(path, params=None):
     url = path + ("?" + urllib.parse.urlencode(params) if params else "")
@@ -29,7 +44,8 @@ def resolve_username(username):
             data = json.loads(r.read().decode())
             if data.get("data"):
                 return data["data"][0]["id"], data["data"][0]["name"]
-    except: pass
+    except Exception as e:
+        print(f"[resolve_username {username}] {e}")
     return None, None
 
 def get_display_name(uid):
@@ -37,7 +53,8 @@ def get_display_name(uid):
         req = urllib.request.Request(f"https://users.roblox.com/v1/users/{uid}")
         with urllib.request.urlopen(req, timeout=5) as r:
             return json.loads(r.read().decode()).get("name", str(uid))
-    except:
+    except Exception as e:
+        print(f"[get_display_name {uid}] {e}")
         return str(uid)
 
 def fetch_history(uid, from_ts=None, to_ts=None):
@@ -47,8 +64,11 @@ def fetch_history(uid, from_ts=None, to_ts=None):
             {"datastoreName": DS_NAME, "entryKey": f"P_{uid}"}
         )
     except urllib.error.HTTPError as e:
+        if e.code != 404:
+            print(f"[fetch_history {uid}] HTTP {e.code}")
         return [] if e.code == 404 else None
-    except:
+    except Exception as e:
+        print(f"[fetch_history {uid}] {e}")
         return None
     if not isinstance(data, list): return []
     result = []
@@ -63,6 +83,7 @@ def fetch_history(uid, from_ts=None, to_ts=None):
 UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120 Safari/537.36"
 
 _catalog_csrf = ""
+_catalog_csrf_lock = threading.Lock()
 
 def catalog_item_detail(iid, tp):
     global _catalog_csrf
@@ -71,8 +92,9 @@ def catalog_item_detail(iid, tp):
     url  = "https://catalog.roblox.com/v1/catalog/items/details"
     for attempt in range(2):
         headers = {"Content-Type": "application/json", "User-Agent": UA}
-        if _catalog_csrf:
-            headers["X-CSRF-Token"] = _catalog_csrf
+        with _catalog_csrf_lock:
+            if _catalog_csrf:
+                headers["X-CSRF-Token"] = _catalog_csrf
         req = urllib.request.Request(url, data=body, headers=headers, method="POST")
         try:
             with urllib.request.urlopen(req, timeout=10) as r:
@@ -81,10 +103,12 @@ def catalog_item_detail(iid, tp):
         except urllib.error.HTTPError as e:
             token = e.headers.get("x-csrf-token")
             if token:
-                _catalog_csrf = token
+                with _catalog_csrf_lock:
+                    _catalog_csrf = token
             if attempt == 0:
                 continue
-        except Exception:
+        except Exception as e:
+            print(f"[catalog {tp}_{iid}] {e}")
             break
     return None
 
@@ -97,6 +121,10 @@ def roblox_public(url, data=None, method="GET"):
         return json.loads(r.read().decode())
 
 def fetch_item_details(items):
+    ck = ("items", tuple(sorted({f"{e['tp']}_{e['id']}" for e in items})))
+    cached = cache_get(ck, 3600)
+    if cached is not None:
+        return cached
     result = {}
     assets  = [e["id"] for e in items if e["tp"] != "B"]
     bundles = [e["id"] for e in items if e["tp"] == "B"]
@@ -167,7 +195,7 @@ def fetch_item_details(items):
             if price:
                 result[key]["price"] = price
 
-
+    cache_set(ck, result)
     return result
 
 
@@ -210,6 +238,11 @@ def batch_usernames(uids):
 
 
 def fetch_all_history(from_ts=None, to_ts=None):
+    ck = ("all", from_ts, to_ts)
+    cached = cache_get(ck, 300)
+    if cached is not None:
+        return cached
+
     keys = list_all_keys()
 
     def fetch_for_key(key):
@@ -238,6 +271,7 @@ def fetch_all_history(from_ts=None, to_ts=None):
         e["username"] = uid_names.get(e["uid"], str(e["uid"]))
 
     all_entries.sort(key=lambda x: x["ts"], reverse=True)
+    cache_set(ck, all_entries)
     return all_entries
 
 

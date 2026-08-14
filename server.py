@@ -445,6 +445,10 @@ td:last-child{border-right:1px solid #f0f2f7;border-radius:0 10px 10px 0}
       <button class="qbtn" onclick="quickFilter(30)">30 วัน</button>
       <button class="qbtn active" onclick="quickFilter(0)">ทั้งหมด</button>
     </div>
+    <div class="qrow">
+      <button class="qbtn" id="sortHighBtn" onclick="sortByPrice('desc')">ราคา: สูง → ต่ำ</button>
+      <button class="qbtn" id="sortLowBtn" onclick="sortByPrice('asc')">ราคา: ต่ำ → สูง</button>
+    </div>
   </div>
 </div>
 
@@ -463,6 +467,10 @@ td:last-child{border-right:1px solid #f0f2f7;border-radius:0 10px 10px 0}
 
 <script>
 let _pw = ''
+let _items = []
+let _itemMap = {}
+let _defaultUsername = ''
+let _sortMode = null
 function pad(n){return String(n).padStart(2,'0')}
 function fmtParts(ts){
   const d=new Date(ts*1000)
@@ -495,6 +503,34 @@ function quickFilter(days){
   document.getElementById('toDate').value=toISO(Math.floor(now.getTime()/1000))
 }
 
+function resetSortUI(){
+  _sortMode=null
+  document.getElementById('sortHighBtn').classList.remove('active')
+  document.getElementById('sortLowBtn').classList.remove('active')
+}
+
+function sortByPrice(mode){
+  const btn=document.getElementById(mode==='desc'?'sortHighBtn':'sortLowBtn')
+  if(_sortMode===mode){
+    resetSortUI()   // กดปุ่มเดิมซ้ำ = ยกเลิกการเรียง กลับไปเรียงตามวันที่เดิม
+  }else{
+    _sortMode=mode
+    document.getElementById('sortHighBtn').classList.remove('active')
+    document.getElementById('sortLowBtn').classList.remove('active')
+    btn.classList.add('active')
+  }
+  renderSorted()
+}
+
+function renderSorted(){
+  let items=_items
+  if(_sortMode){
+    items=[..._items].sort((a,b)=>_sortMode==='desc' ? (b.p||0)-(a.p||0) : (a.p||0)-(b.p||0))
+  }
+  document.getElementById('tbody').innerHTML=renderRows(items,_defaultUsername)
+  applyDetails(items,_itemMap)
+}
+
 function renderRows(items, defaultUsername){
   return items.map(e=>{
     const isB=e.tp==='B',{date,time}=fmtParts(e.ts)
@@ -523,6 +559,7 @@ async function loadAll(){
     document.getElementById('sTotal').textContent=items.length.toLocaleString()
     document.getElementById('sRevenue').textContent='R$ '+items.reduce((s,e)=>s+(e.p||0),0).toLocaleString()
     document.getElementById('statsRow').style.display='flex'
+    _items=items;_defaultUsername='';resetSortUI()
     document.getElementById('tbody').innerHTML=renderRows(items,'')
     document.getElementById('tbl').style.display='table'
     loadThumbnails(items)
@@ -555,11 +592,32 @@ async function search(){
     document.getElementById('sTotal').textContent=items.length.toLocaleString()
     document.getElementById('sRevenue').textContent='R$ '+items.reduce((s,e)=>s+(e.p||0),0).toLocaleString()
     document.getElementById('statsRow').style.display='flex'
+    _items=items;_defaultUsername=data.username;resetSortUI()
     document.getElementById('tbody').innerHTML=renderRows(items,data.username)
     document.getElementById('tbl').style.display='table'
     loadThumbnails(items)
   }catch(e){status.className='status err';status.textContent='เกิดข้อผิดพลาด: '+e.message}
   finally{btn.disabled=false}
+}
+
+function applyDetails(items, map){
+  document.querySelectorAll('img.thumb').forEach(img=>{
+    const key=`${img.dataset.tp}_${img.dataset.id}`
+    if(map[key]?.thumb) img.src=map[key].thumb
+  })
+  document.querySelectorAll('td.item-name[data-id]').forEach(el=>{
+    const key=`${el.dataset.tp}_${el.dataset.id}`
+    const n=map[key]?.name
+    if(n) el.textContent=n
+  })
+  document.querySelectorAll('span.creator').forEach(el=>{
+    const key=`${el.dataset.tp}_${el.dataset.id}`
+    const c=map[key]?.creator
+    if(c) el.textContent=c
+    else if(el.textContent==='...') el.textContent='—'
+  })
+  // ราคาไม่แตะ — คอลัมน์ราคาต้องคงเป็นราคาที่จ่ายจริงตอนซื้อ (e.p จาก DataStore) เสมอ
+  // ไม่ใช่ราคาปัจจุบันของไอเทม ซึ่งอาจเปลี่ยนไปแล้วโดยเฉพาะไอเทม Limited
 }
 
 async function loadThumbnails(items){
@@ -570,24 +628,8 @@ async function loadThumbnails(items){
       headers:{'Content-Type':'application/json','X-Password':_pw},
       body:JSON.stringify(unique)
     })
-    const map=await r.json()
-    document.querySelectorAll('img.thumb').forEach(img=>{
-      const key=`${img.dataset.tp}_${img.dataset.id}`
-      if(map[key]?.thumb) img.src=map[key].thumb
-    })
-    document.querySelectorAll('td.item-name[data-id]').forEach(el=>{
-      const key=`${el.dataset.tp}_${el.dataset.id}`
-      const n=map[key]?.name
-      if(n) el.textContent=n
-    })
-    document.querySelectorAll('span.creator').forEach(el=>{
-      const key=`${el.dataset.tp}_${el.dataset.id}`
-      const c=map[key]?.creator
-      if(c) el.textContent=c
-      else if(el.textContent==='...') el.textContent='—'
-    })
-    // ราคาไม่แตะ — คอลัมน์ราคาต้องคงเป็นราคาที่จ่ายจริงตอนซื้อ (e.p จาก DataStore) เสมอ
-    // ไม่ใช่ราคาปัจจุบันของไอเทม ซึ่งอาจเปลี่ยนไปแล้วโดยเฉพาะไอเทม Limited
+    _itemMap=await r.json()
+    applyDetails(items,_itemMap)
   }catch{}
 }
 </script>

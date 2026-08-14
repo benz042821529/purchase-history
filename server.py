@@ -586,19 +586,8 @@ async function loadThumbnails(items){
       if(c) el.textContent=c
       else if(el.textContent==='...') el.textContent='—'
     })
-    document.querySelectorAll('td.price[data-id]').forEach(el=>{
-      const key=`${el.dataset.tp}_${el.dataset.id}`
-      const p=map[key]?.price
-      if(p) el.textContent='R$ '+p
-    })
-    // คำนวณ total ใหม่หลัง API อัปเดตราคาแล้ว
-    let total=0
-    document.querySelectorAll('td.price[data-id]').forEach(el=>{
-      const val=el.textContent.replace('R$ ','').replace(',','')
-      const n=parseInt(val)
-      if(!isNaN(n)) total+=n
-    })
-    document.getElementById('sRevenue').textContent='R$ '+total.toLocaleString()
+    // ราคาไม่แตะ — คอลัมน์ราคาต้องคงเป็นราคาที่จ่ายจริงตอนซื้อ (e.p จาก DataStore) เสมอ
+    // ไม่ใช่ราคาปัจจุบันของไอเทม ซึ่งอาจเปลี่ยนไปแล้วโดยเฉพาะไอเทม Limited
   }catch{}
 }
 </script>

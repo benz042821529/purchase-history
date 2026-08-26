@@ -1,13 +1,24 @@
 #!/usr/bin/env python3
-import os, json, time, threading
+import os, json, time, threading, smtplib
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.request, urllib.parse, urllib.error
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime, timedelta
+from email.mime.multipart import MIMEMultipart
+from email.mime.text import MIMEText
 
 API_KEY     = os.environ.get("API_KEY", "")
 UNIVERSE_ID = os.environ.get("UNIVERSE_ID", "")
 PASSWORD    = os.environ.get("PASSWORD", "admin")
 PORT        = int(os.environ.get("PORT", 8080))
+
+# --- Email digest (สรุปยอดขายรายวัน) ---
+NOTIFY_EMAIL      = os.environ.get("NOTIFY_EMAIL", "s5703052412021@gmail.com")
+SMTP_USER         = os.environ.get("SMTP_USER", "")
+SMTP_APP_PASSWORD = os.environ.get("SMTP_APP_PASSWORD", "")
+SMTP_HOST         = os.environ.get("SMTP_HOST", "smtp.gmail.com")
+SMTP_PORT         = int(os.environ.get("SMTP_PORT", 587))
+DIGEST_HOUR       = int(os.environ.get("DIGEST_HOUR", 7))  # ส่งทุกวันตามเวลาเครื่อง server
 
 BASE    = f"https://apis.roblox.com/datastores/v1/universes/{UNIVERSE_ID}"
 DS_NAME = "PurchaseLog_v1"
@@ -345,6 +356,69 @@ def fetch_all_history(from_ts=None, to_ts=None):
     all_entries.sort(key=lambda x: x["ts"], reverse=True)
     cache_set(ck, all_entries)
     return all_entries
+
+
+def send_email(subject, html_body):
+    if not (SMTP_USER and SMTP_APP_PASSWORD and NOTIFY_EMAIL):
+        raise RuntimeError("ไม่ได้ตั้งค่า SMTP_USER / SMTP_APP_PASSWORD / NOTIFY_EMAIL")
+    msg = MIMEMultipart("alternative")
+    msg["Subject"] = subject
+    msg["From"]    = SMTP_USER
+    msg["To"]      = NOTIFY_EMAIL
+    msg.attach(MIMEText(html_body, "html", "utf-8"))
+    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
+        s.starttls()
+        s.login(SMTP_USER, SMTP_APP_PASSWORD)
+        s.sendmail(SMTP_USER, [NOTIFY_EMAIL], msg.as_string())
+
+
+def build_digest_html(date_str, entries, item_map):
+    total   = len(entries)
+    revenue = sum(e.get("p", 0) for e in entries)
+    rows = ""
+    for e in sorted(entries, key=lambda x: x.get("p", 0), reverse=True):
+        key  = f"{e['tp']}_{e['id']}"
+        name = item_map.get(key, {}).get("name") or f"ID:{e['id']}"
+        rows += (
+            f'<tr><td style="padding:6px 10px;border-bottom:1px solid #eee">{e.get("username","")}</td>'
+            f'<td style="padding:6px 10px;border-bottom:1px solid #eee">{name}</td>'
+            f'<td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">R$ {e.get("p",0):,}</td></tr>'
+        )
+    if not rows:
+        rows = '<tr><td colspan="3" style="padding:14px;text-align:center;color:#999">ไม่มีการซื้อในวันนี้</td></tr>'
+    return f"""<html><body style="font-family:'Segoe UI',sans-serif;color:#1a1a2e">
+<h2 style="margin-bottom:4px">สรุปยอดขาย {date_str}</h2>
+<p style="color:#666;margin-top:0">รายการทั้งหมด: <b>{total}</b> &nbsp;|&nbsp; รายได้รวม: <b>R$ {revenue:,}</b></p>
+<table style="border-collapse:collapse;width:100%;max-width:640px">
+<tr style="background:#f7f8fc"><th style="padding:6px 10px;text-align:left">ผู้เล่น</th><th style="padding:6px 10px;text-align:left">สินค้า</th><th style="padding:6px 10px;text-align:right">ราคา</th></tr>
+{rows}
+</table>
+</body></html>"""
+
+
+def run_daily_digest():
+    y = datetime.now() - timedelta(days=1)
+    start = datetime(y.year, y.month, y.day, 0, 0, 0)
+    end   = datetime(y.year, y.month, y.day, 23, 59, 59)
+    date_str = start.strftime("%Y-%m-%d")
+    try:
+        entries  = fetch_all_history(start.timestamp(), end.timestamp())
+        item_map = fetch_item_details(entries) if entries else {}
+        html     = build_digest_html(date_str, entries, item_map)
+        send_email(f"[Purchase History] สรุปยอดขาย {date_str} — {len(entries)} รายการ", html)
+        print(f"[digest] ส่งอีเมลสรุปยอด {date_str} สำเร็จ ({len(entries)} รายการ)")
+    except Exception as e:
+        print(f"[digest] ส่งอีเมลล้มเหลว: {e}")
+
+
+def digest_scheduler():
+    while True:
+        now    = datetime.now()
+        target = now.replace(hour=DIGEST_HOUR, minute=0, second=0, microsecond=0)
+        if target <= now:
+            target += timedelta(days=1)
+        time.sleep((target - now).total_seconds())
+        run_daily_digest()
 
 
 HTML = """<!DOCTYPE html>
@@ -696,6 +770,14 @@ class Handler(BaseHTTPRequestHandler):
             if not self._check_auth():
                 self._json(401, {"message": "Unauthorized"}); return
             self._api_all(parsed.query)
+        elif parsed.path == "/api/test-digest":
+            if not self._check_auth():
+                self._json(401, {"message": "Unauthorized"}); return
+            try:
+                run_daily_digest()
+                self._json(200, {"ok": True, "message": f"ส่งไปที่ {NOTIFY_EMAIL} แล้ว (ดูผลจริงใน log ของ server)"})
+            except Exception as e:
+                self._json(500, {"message": str(e)})
         else:
             b = HTML.encode()
             self.send_response(200)
@@ -753,5 +835,10 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     if not API_KEY:
         print("⚠️  ไม่พบ API_KEY — ตั้งค่า environment variable ก่อน")
+    if SMTP_USER and SMTP_APP_PASSWORD:
+        threading.Thread(target=digest_scheduler, daemon=True).start()
+        print(f"📧 Email digest เปิดใช้งาน → ส่งทุกวัน {DIGEST_HOUR:02d}:00 น. ไปที่ {NOTIFY_EMAIL}")
+    else:
+        print("ℹ️  ไม่ได้ตั้งค่า SMTP_USER / SMTP_APP_PASSWORD — ปิดใช้งาน email digest (ดู README)")
     print(f"\n Purchase History  →  http://localhost:{PORT}\n")
     HTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

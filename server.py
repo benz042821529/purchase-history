@@ -14,7 +14,7 @@ PORT        = int(os.environ.get("PORT", 8080))
 
 # --- Email digest (สรุปยอดขายรายวัน) ---
 NOTIFY_EMAIL      = os.environ.get("NOTIFY_EMAIL", "s5703052412021@gmail.com")
-SMTP_USER         = os.environ.get("SMTP_USER", "")
+SMTP_USER         = os.environ.get("SMTP_USER", "s5703052412021@gmail.com")
 SMTP_APP_PASSWORD = os.environ.get("SMTP_APP_PASSWORD", "")
 SMTP_HOST         = os.environ.get("SMTP_HOST", "smtp.gmail.com")
 SMTP_PORT         = int(os.environ.get("SMTP_PORT", 587))
@@ -377,20 +377,40 @@ def build_digest_html(date_str, entries, item_map):
     revenue = sum(e.get("p", 0) for e in entries)
     rows = ""
     for e in sorted(entries, key=lambda x: x.get("p", 0), reverse=True):
-        key  = f"{e['tp']}_{e['id']}"
-        name = item_map.get(key, {}).get("name") or f"ID:{e['id']}"
+        key     = f"{e['tp']}_{e['id']}"
+        info    = item_map.get(key, {})
+        name    = info.get("name") or f"ID:{e['id']}"
+        creator = info.get("creator") or "—"
+        thumb   = info.get("thumb") or ""
+        when    = datetime.fromtimestamp(e.get("ts", 0)).strftime("%Y-%m-%d %H:%M:%S")
+        img = (
+            f'<img src="{thumb}" width="48" height="48" style="border-radius:8px;display:block;object-fit:cover;background:#f0f2f7">'
+            if thumb else '<div style="width:48px;height:48px;border-radius:8px;background:#f0f2f7"></div>'
+        )
         rows += (
-            f'<tr><td style="padding:6px 10px;border-bottom:1px solid #eee">{e.get("username","")}</td>'
+            f'<tr>'
+            f'<td style="padding:6px 10px;border-bottom:1px solid #eee;width:56px">{img}</td>'
+            f'<td style="padding:6px 10px;border-bottom:1px solid #eee">{e.get("username","")}</td>'
             f'<td style="padding:6px 10px;border-bottom:1px solid #eee">{name}</td>'
-            f'<td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">R$ {e.get("p",0):,}</td></tr>'
+            f'<td style="padding:6px 10px;border-bottom:1px solid #eee;color:#888;font-size:12px">{creator}</td>'
+            f'<td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">R$ {e.get("p",0):,}</td>'
+            f'<td style="padding:6px 10px;border-bottom:1px solid #eee;color:#aaa;font-size:12px;white-space:nowrap">{when}</td>'
+            f'</tr>'
         )
     if not rows:
-        rows = '<tr><td colspan="3" style="padding:14px;text-align:center;color:#999">ไม่มีการซื้อในวันนี้</td></tr>'
+        rows = '<tr><td colspan="6" style="padding:14px;text-align:center;color:#999">ไม่มีการซื้อในวันนี้</td></tr>'
     return f"""<html><body style="font-family:'Segoe UI',sans-serif;color:#1a1a2e">
 <h2 style="margin-bottom:4px">สรุปยอดขาย {date_str}</h2>
 <p style="color:#666;margin-top:0">รายการทั้งหมด: <b>{total}</b> &nbsp;|&nbsp; รายได้รวม: <b>R$ {revenue:,}</b></p>
-<table style="border-collapse:collapse;width:100%;max-width:640px">
-<tr style="background:#f7f8fc"><th style="padding:6px 10px;text-align:left">ผู้เล่น</th><th style="padding:6px 10px;text-align:left">สินค้า</th><th style="padding:6px 10px;text-align:right">ราคา</th></tr>
+<table style="border-collapse:collapse;width:100%;max-width:680px">
+<tr style="background:#f7f8fc">
+<th style="padding:6px 10px"></th>
+<th style="padding:6px 10px;text-align:left">ผู้เล่น</th>
+<th style="padding:6px 10px;text-align:left">สินค้า</th>
+<th style="padding:6px 10px;text-align:left">ผู้สร้าง</th>
+<th style="padding:6px 10px;text-align:right">ราคา</th>
+<th style="padding:6px 10px;text-align:left">เวลาที่ซื้อ</th>
+</tr>
 {rows}
 </table>
 </body></html>"""

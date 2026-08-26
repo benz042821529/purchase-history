@@ -368,7 +368,11 @@ def send_email(subject, html_body):
     req = urllib.request.Request(
         "https://api.resend.com/emails",
         data=body,
-        headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+        headers={
+            "Authorization": f"Bearer {RESEND_API_KEY}",
+            "Content-Type": "application/json",
+            "User-Agent": UA,  # ไม่งั้น Cloudflare หน้า Resend บล็อก User-Agent เริ่มต้นของ urllib (error 1010)
+        },
         method="POST",
     )
     try:

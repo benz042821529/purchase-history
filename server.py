@@ -1,19 +1,9 @@
 #!/usr/bin/env python3
-import os, json, time, threading, smtplib, socket
+import os, json, time, threading
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.request, urllib.parse, urllib.error
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
-from email.mime.multipart import MIMEMultipart
-from email.mime.text import MIMEText
-
-# Render (และ PaaS ฟรีหลายเจ้า) เดินทางเครือข่ายขาออกแบบ IPv6 ไม่ได้
-# แต่ smtp.gmail.com มักถูก resolve เป็น IPv6 ก่อน ทำให้ smtplib ต่อไม่ติด
-# (Network is unreachable) — บังคับ resolve เป็น IPv4 เท่านั้นทั้งโปรเซส
-_orig_getaddrinfo = socket.getaddrinfo
-def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
-    return _orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
-socket.getaddrinfo = _ipv4_only_getaddrinfo
 
 API_KEY     = os.environ.get("API_KEY", "")
 UNIVERSE_ID = os.environ.get("UNIVERSE_ID", "")
@@ -21,12 +11,12 @@ PASSWORD    = os.environ.get("PASSWORD", "admin")
 PORT        = int(os.environ.get("PORT", 8080))
 
 # --- Email digest (สรุปยอดขายรายวัน) ---
-NOTIFY_EMAIL      = os.environ.get("NOTIFY_EMAIL", "s5703052412021@gmail.com")
-SMTP_USER         = os.environ.get("SMTP_USER", "s5703052412021@gmail.com")
-SMTP_APP_PASSWORD = os.environ.get("SMTP_APP_PASSWORD", "")
-SMTP_HOST         = os.environ.get("SMTP_HOST", "smtp.gmail.com")
-SMTP_PORT         = int(os.environ.get("SMTP_PORT", 587))
-DIGEST_HOUR       = int(os.environ.get("DIGEST_HOUR", 7))  # ส่งทุกวันตามเวลาเครื่อง server
+# ส่งผ่าน Resend HTTP API (พอร์ต 443) แทน SMTP ตรง — Render บล็อกพอร์ต SMTP (587/465/25)
+# ขาออกทั้งหมด ต่อให้ credential ถูกก็ connect ไม่ติด (timeout)
+NOTIFY_EMAIL    = os.environ.get("NOTIFY_EMAIL", "s5703052412021@gmail.com")
+RESEND_API_KEY  = os.environ.get("RESEND_API_KEY", "")
+RESEND_FROM     = os.environ.get("RESEND_FROM", "Purchase History <onboarding@resend.dev>")
+DIGEST_HOUR     = int(os.environ.get("DIGEST_HOUR", 7))  # ส่งทุกวันตามเวลาเครื่อง server
 
 BASE    = f"https://apis.roblox.com/datastores/v1/universes/{UNIVERSE_ID}"
 DS_NAME = "PurchaseLog_v1"
@@ -367,17 +357,25 @@ def fetch_all_history(from_ts=None, to_ts=None):
 
 
 def send_email(subject, html_body):
-    if not (SMTP_USER and SMTP_APP_PASSWORD and NOTIFY_EMAIL):
-        raise RuntimeError("ไม่ได้ตั้งค่า SMTP_USER / SMTP_APP_PASSWORD / NOTIFY_EMAIL")
-    msg = MIMEMultipart("alternative")
-    msg["Subject"] = subject
-    msg["From"]    = SMTP_USER
-    msg["To"]      = NOTIFY_EMAIL
-    msg.attach(MIMEText(html_body, "html", "utf-8"))
-    with smtplib.SMTP(SMTP_HOST, SMTP_PORT, timeout=15) as s:
-        s.starttls()
-        s.login(SMTP_USER, SMTP_APP_PASSWORD)
-        s.sendmail(SMTP_USER, [NOTIFY_EMAIL], msg.as_string())
+    if not (RESEND_API_KEY and NOTIFY_EMAIL):
+        raise RuntimeError("ไม่ได้ตั้งค่า RESEND_API_KEY / NOTIFY_EMAIL")
+    body = json.dumps({
+        "from": RESEND_FROM,
+        "to": [NOTIFY_EMAIL],
+        "subject": subject,
+        "html": html_body,
+    }).encode()
+    req = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=body,
+        headers={"Authorization": f"Bearer {RESEND_API_KEY}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            r.read()
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"Resend API error {e.code}: {e.read().decode()}")
 
 
 def build_digest_html(date_str, entries, item_map):
@@ -863,10 +861,10 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     if not API_KEY:
         print("⚠️  ไม่พบ API_KEY — ตั้งค่า environment variable ก่อน")
-    if SMTP_USER and SMTP_APP_PASSWORD:
+    if RESEND_API_KEY:
         threading.Thread(target=digest_scheduler, daemon=True).start()
         print(f"📧 Email digest เปิดใช้งาน → ส่งทุกวัน {DIGEST_HOUR:02d}:00 น. ไปที่ {NOTIFY_EMAIL}")
     else:
-        print("ℹ️  ไม่ได้ตั้งค่า SMTP_USER / SMTP_APP_PASSWORD — ปิดใช้งาน email digest (ดู README)")
+        print("ℹ️  ไม่ได้ตั้งค่า RESEND_API_KEY — ปิดใช้งาน email digest (ดู README)")
     print(f"\n Purchase History  →  http://localhost:{PORT}\n")
     HTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

@@ -1,11 +1,19 @@
 #!/usr/bin/env python3
-import os, json, time, threading, smtplib
+import os, json, time, threading, smtplib, socket
 from http.server import HTTPServer, BaseHTTPRequestHandler
 import urllib.request, urllib.parse, urllib.error
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
+
+# Render (และ PaaS ฟรีหลายเจ้า) เดินทางเครือข่ายขาออกแบบ IPv6 ไม่ได้
+# แต่ smtp.gmail.com มักถูก resolve เป็น IPv6 ก่อน ทำให้ smtplib ต่อไม่ติด
+# (Network is unreachable) — บังคับ resolve เป็น IPv4 เท่านั้นทั้งโปรเซส
+_orig_getaddrinfo = socket.getaddrinfo
+def _ipv4_only_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    return _orig_getaddrinfo(host, port, socket.AF_INET, type, proto, flags)
+socket.getaddrinfo = _ipv4_only_getaddrinfo
 
 API_KEY     = os.environ.get("API_KEY", "")
 UNIVERSE_ID = os.environ.get("UNIVERSE_ID", "")

@@ -3,20 +3,11 @@ import os, json, time, threading
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import urllib.request, urllib.parse, urllib.error
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
 
 API_KEY     = os.environ.get("API_KEY", "")
 UNIVERSE_ID = os.environ.get("UNIVERSE_ID", "")
 PASSWORD    = os.environ.get("PASSWORD", "admin")
 PORT        = int(os.environ.get("PORT", 8080))
-
-# --- Email digest (สรุปยอดขายรายวัน) ---
-# ส่งผ่าน Resend HTTP API (พอร์ต 443) แทน SMTP ตรง — Render บล็อกพอร์ต SMTP (587/465/25)
-# ขาออกทั้งหมด ต่อให้ credential ถูกก็ connect ไม่ติด (timeout)
-NOTIFY_EMAIL    = os.environ.get("NOTIFY_EMAIL", "s5703052412021@gmail.com")
-RESEND_API_KEY  = os.environ.get("RESEND_API_KEY", "")
-RESEND_FROM     = os.environ.get("RESEND_FROM", "Purchase History <onboarding@resend.dev>")
-DIGEST_HOUR     = int(os.environ.get("DIGEST_HOUR", 7))  # ส่งทุกวันตามเวลาเครื่อง server
 
 BASE    = f"https://apis.roblox.com/datastores/v1/universes/{UNIVERSE_ID}"
 DS_NAME = "PurchaseLog_v1"
@@ -354,101 +345,6 @@ def fetch_all_history(from_ts=None, to_ts=None):
     all_entries.sort(key=lambda x: x["ts"], reverse=True)
     cache_set(ck, all_entries)
     return all_entries
-
-
-def send_email(subject, html_body):
-    if not (RESEND_API_KEY and NOTIFY_EMAIL):
-        raise RuntimeError("ไม่ได้ตั้งค่า RESEND_API_KEY / NOTIFY_EMAIL")
-    body = json.dumps({
-        "from": RESEND_FROM,
-        "to": [NOTIFY_EMAIL],
-        "subject": subject,
-        "html": html_body,
-    }).encode()
-    req = urllib.request.Request(
-        "https://api.resend.com/emails",
-        data=body,
-        headers={
-            "Authorization": f"Bearer {RESEND_API_KEY}",
-            "Content-Type": "application/json",
-            "User-Agent": UA,  # ไม่งั้น Cloudflare หน้า Resend บล็อก User-Agent เริ่มต้นของ urllib (error 1010)
-        },
-        method="POST",
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=15) as r:
-            r.read()
-    except urllib.error.HTTPError as e:
-        raise RuntimeError(f"Resend API error {e.code}: {e.read().decode()}")
-
-
-def build_digest_html(date_str, entries, item_map):
-    total   = len(entries)
-    revenue = sum(e.get("p", 0) for e in entries)
-    rows = ""
-    for e in sorted(entries, key=lambda x: x.get("p", 0), reverse=True):
-        key     = f"{e['tp']}_{e['id']}"
-        info    = item_map.get(key, {})
-        name    = info.get("name") or f"ID:{e['id']}"
-        creator = info.get("creator") or "—"
-        thumb   = info.get("thumb") or ""
-        when    = datetime.fromtimestamp(e.get("ts", 0)).strftime("%Y-%m-%d %H:%M:%S")
-        img = (
-            f'<img src="{thumb}" width="48" height="48" style="border-radius:8px;display:block;object-fit:cover;background:#f0f2f7">'
-            if thumb else '<div style="width:48px;height:48px;border-radius:8px;background:#f0f2f7"></div>'
-        )
-        rows += (
-            f'<tr>'
-            f'<td style="padding:6px 10px;border-bottom:1px solid #eee;width:56px">{img}</td>'
-            f'<td style="padding:6px 10px;border-bottom:1px solid #eee">{e.get("username","")}</td>'
-            f'<td style="padding:6px 10px;border-bottom:1px solid #eee">{name}</td>'
-            f'<td style="padding:6px 10px;border-bottom:1px solid #eee;color:#888;font-size:12px">{creator}</td>'
-            f'<td style="padding:6px 10px;border-bottom:1px solid #eee;text-align:right">R$ {e.get("p",0):,}</td>'
-            f'<td style="padding:6px 10px;border-bottom:1px solid #eee;color:#aaa;font-size:12px;white-space:nowrap">{when}</td>'
-            f'</tr>'
-        )
-    if not rows:
-        rows = '<tr><td colspan="6" style="padding:14px;text-align:center;color:#999">ไม่มีการซื้อในวันนี้</td></tr>'
-    return f"""<html><body style="font-family:'Segoe UI',sans-serif;color:#1a1a2e">
-<h2 style="margin-bottom:4px">สรุปยอดขาย {date_str}</h2>
-<p style="color:#666;margin-top:0">รายการทั้งหมด: <b>{total}</b> &nbsp;|&nbsp; รายได้รวม: <b>R$ {revenue:,}</b></p>
-<table style="border-collapse:collapse;width:100%;max-width:680px">
-<tr style="background:#f7f8fc">
-<th style="padding:6px 10px"></th>
-<th style="padding:6px 10px;text-align:left">ผู้เล่น</th>
-<th style="padding:6px 10px;text-align:left">สินค้า</th>
-<th style="padding:6px 10px;text-align:left">ผู้สร้าง</th>
-<th style="padding:6px 10px;text-align:right">ราคา</th>
-<th style="padding:6px 10px;text-align:left">เวลาที่ซื้อ</th>
-</tr>
-{rows}
-</table>
-</body></html>"""
-
-
-def run_daily_digest():
-    y = datetime.now() - timedelta(days=1)
-    start = datetime(y.year, y.month, y.day, 0, 0, 0)
-    end   = datetime(y.year, y.month, y.day, 23, 59, 59)
-    date_str = start.strftime("%Y-%m-%d")
-    entries  = fetch_all_history(start.timestamp(), end.timestamp())
-    item_map = fetch_item_details(entries) if entries else {}
-    html     = build_digest_html(date_str, entries, item_map)
-    send_email(f"[Purchase History] สรุปยอดขาย {date_str} — {len(entries)} รายการ", html)
-    print(f"[digest] ส่งอีเมลสรุปยอด {date_str} สำเร็จ ({len(entries)} รายการ)")
-
-
-def digest_scheduler():
-    while True:
-        now    = datetime.now()
-        target = now.replace(hour=DIGEST_HOUR, minute=0, second=0, microsecond=0)
-        if target <= now:
-            target += timedelta(days=1)
-        time.sleep((target - now).total_seconds())
-        try:
-            run_daily_digest()
-        except Exception as e:
-            print(f"[digest] ส่งอีเมลล้มเหลว: {e}")
 
 
 HTML = """<!DOCTYPE html>
@@ -814,14 +710,6 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"status": e.code, "body": e.read().decode()})
             except Exception as e:
                 self._json(200, {"status": None, "error": str(e)})
-        elif parsed.path == "/api/test-digest":
-            if not self._check_auth():
-                self._json(401, {"message": "Unauthorized"}); return
-            try:
-                run_daily_digest()
-                self._json(200, {"ok": True, "message": f"ส่งไปที่ {NOTIFY_EMAIL} แล้ว (ดูผลจริงใน log ของ server)"})
-            except Exception as e:
-                self._json(500, {"message": str(e)})
         else:
             b = HTML.encode()
             self.send_response(200)
@@ -879,10 +767,5 @@ class Handler(BaseHTTPRequestHandler):
 if __name__ == "__main__":
     if not API_KEY:
         print("⚠️  ไม่พบ API_KEY — ตั้งค่า environment variable ก่อน")
-    if RESEND_API_KEY:
-        threading.Thread(target=digest_scheduler, daemon=True).start()
-        print(f"📧 Email digest เปิดใช้งาน → ส่งทุกวัน {DIGEST_HOUR:02d}:00 น. ไปที่ {NOTIFY_EMAIL}")
-    else:
-        print("ℹ️  ไม่ได้ตั้งค่า RESEND_API_KEY — ปิดใช้งาน email digest (ดู README)")
     print(f"\n Purchase History  →  http://localhost:{PORT}\n")
     ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

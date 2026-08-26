@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import os, json, time, threading
-from http.server import HTTPServer, BaseHTTPRequestHandler
+from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import urllib.request, urllib.parse, urllib.error
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta
@@ -885,4 +885,4 @@ if __name__ == "__main__":
     else:
         print("ℹ️  ไม่ได้ตั้งค่า RESEND_API_KEY — ปิดใช้งาน email digest (ดู README)")
     print(f"\n Purchase History  →  http://localhost:{PORT}\n")
-    HTTPServer(("0.0.0.0", PORT), Handler).serve_forever()
+    ThreadingHTTPServer(("0.0.0.0", PORT), Handler).serve_forever()

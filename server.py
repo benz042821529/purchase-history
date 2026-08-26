@@ -814,26 +814,6 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(200, {"status": e.code, "body": e.read().decode()})
             except Exception as e:
                 self._json(200, {"status": None, "error": str(e)})
-        elif parsed.path == "/api/debug-delete-key":
-            # ใช้ครั้งเดียวสำหรับลบข้อมูลทดสอบ/เจ้าของแมพออกจาก PurchaseLog_v1 — ลบ endpoint นี้หลังใช้เสร็จ
-            if not self._check_auth():
-                self._json(401, {"message": "Unauthorized"}); return
-            p   = urllib.parse.parse_qs(parsed.query)
-            key = (p.get("key") or [""])[0]
-            ALLOWED_KEYS = {"P_test123", "P_8486039661"}
-            if key not in ALLOWED_KEYS:
-                self._json(400, {"message": f"key ต้องเป็นหนึ่งใน {ALLOWED_KEYS}"}); return
-            url = f"{BASE}/standard-datastores/datastore/entries/entry?" + urllib.parse.urlencode(
-                {"datastoreName": DS_NAME, "entryKey": key}
-            )
-            req = urllib.request.Request(url, headers={"x-api-key": API_KEY}, method="DELETE")
-            try:
-                with urllib.request.urlopen(req, timeout=10) as r:
-                    self._json(200, {"status": r.status, "deleted": key})
-            except urllib.error.HTTPError as e:
-                self._json(200, {"status": e.code, "error": e.read().decode()})
-            except Exception as e:
-                self._json(200, {"status": None, "error": str(e)})
         elif parsed.path == "/api/test-digest":
             if not self._check_auth():
                 self._json(401, {"message": "Unauthorized"}); return

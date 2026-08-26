@@ -421,14 +421,11 @@ def run_daily_digest():
     start = datetime(y.year, y.month, y.day, 0, 0, 0)
     end   = datetime(y.year, y.month, y.day, 23, 59, 59)
     date_str = start.strftime("%Y-%m-%d")
-    try:
-        entries  = fetch_all_history(start.timestamp(), end.timestamp())
-        item_map = fetch_item_details(entries) if entries else {}
-        html     = build_digest_html(date_str, entries, item_map)
-        send_email(f"[Purchase History] สรุปยอดขาย {date_str} — {len(entries)} รายการ", html)
-        print(f"[digest] ส่งอีเมลสรุปยอด {date_str} สำเร็จ ({len(entries)} รายการ)")
-    except Exception as e:
-        print(f"[digest] ส่งอีเมลล้มเหลว: {e}")
+    entries  = fetch_all_history(start.timestamp(), end.timestamp())
+    item_map = fetch_item_details(entries) if entries else {}
+    html     = build_digest_html(date_str, entries, item_map)
+    send_email(f"[Purchase History] สรุปยอดขาย {date_str} — {len(entries)} รายการ", html)
+    print(f"[digest] ส่งอีเมลสรุปยอด {date_str} สำเร็จ ({len(entries)} รายการ)")
 
 
 def digest_scheduler():
@@ -438,7 +435,10 @@ def digest_scheduler():
         if target <= now:
             target += timedelta(days=1)
         time.sleep((target - now).total_seconds())
-        run_daily_digest()
+        try:
+            run_daily_digest()
+        except Exception as e:
+            print(f"[digest] ส่งอีเมลล้มเหลว: {e}")
 
 
 HTML = """<!DOCTYPE html>

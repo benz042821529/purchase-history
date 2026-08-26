@@ -800,6 +800,20 @@ class Handler(BaseHTTPRequestHandler):
             if not self._check_auth():
                 self._json(401, {"message": "Unauthorized"}); return
             self._api_all(parsed.query)
+        elif parsed.path == "/api/debug-list-keys":
+            if not self._check_auth():
+                self._json(401, {"message": "Unauthorized"}); return
+            url = f"{BASE}/standard-datastores/datastore/entries?" + urllib.parse.urlencode(
+                {"datastoreName": DS_NAME, "limit": 100, "prefix": "P_"}
+            )
+            req = urllib.request.Request(url, headers={"x-api-key": API_KEY})
+            try:
+                with urllib.request.urlopen(req, timeout=10) as r:
+                    self._json(200, {"status": r.status, "body": json.loads(r.read().decode())})
+            except urllib.error.HTTPError as e:
+                self._json(200, {"status": e.code, "body": e.read().decode()})
+            except Exception as e:
+                self._json(200, {"status": None, "error": str(e)})
         elif parsed.path == "/api/test-digest":
             if not self._check_auth():
                 self._json(401, {"message": "Unauthorized"}); return

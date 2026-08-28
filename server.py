@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, json, time, threading
+import os, json, time, threading, hmac
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import urllib.request, urllib.parse, urllib.error
 from concurrent.futures import ThreadPoolExecutor
@@ -8,6 +8,16 @@ API_KEY     = os.environ.get("API_KEY", "")
 UNIVERSE_ID = os.environ.get("UNIVERSE_ID", "")
 PASSWORD    = os.environ.get("PASSWORD", "admin")
 PORT        = int(os.environ.get("PORT", 8080))
+
+# หน้า "รายการซื้อทั้งหมด" แยกออกมาเป็น URL ลับ /all/<VIEW_TOKEN> — ใครมีลิงก์ก็ดูได้ ไม่ต้องใส่รหัสผ่าน
+# ตั้ง env var VIEW_TOKEN บน Render เพื่อเปลี่ยน token ได้ (ตั้งว่างเพื่อปิดหน้านี้ทั้งหมด)
+VIEW_TOKEN  = os.environ.get("VIEW_TOKEN", "_GOjnm1-spvz_Gvdarkl67epN_KmfjCE")
+
+def token_ok(given):
+    """เทียบ token แบบ constant-time โดยไม่ให้ non-ASCII ทำ compare_digest พัง"""
+    if not VIEW_TOKEN or not isinstance(given, str) or not given.isascii():
+        return False
+    return hmac.compare_digest(given, VIEW_TOKEN)
 
 BASE    = f"https://apis.roblox.com/datastores/v1/universes/{UNIVERSE_ID}"
 DS_NAME = "PurchaseLog_v1"
@@ -489,7 +499,7 @@ function dateToTs(s,end=false){
 async function doLogin(){
   const pw=document.getElementById('pwInput').value
   const res=await fetch('/api/auth',{headers:{'X-Password':pw}})
-  if(res.ok){_pw=pw;document.getElementById('loginOverlay').style.display='none';loadAll()}
+  if(res.ok){_pw=pw;document.getElementById('loginOverlay').style.display='none'}
   else{document.getElementById('loginErr').textContent='รหัสผ่านไม่ถูกต้อง'}
 }
 
@@ -539,38 +549,11 @@ function renderRows(items, defaultUsername){
   }).join('')
 }
 
-async function loadAll(){
-  const status=document.getElementById('status')
-  status.className='status';status.textContent='กำลังโหลดรายการทั้งหมด...'
-  document.getElementById('playerInfo').textContent=''
-  document.getElementById('statsRow').style.display='none'
-  document.getElementById('tbl').style.display='none'
-  document.getElementById('tbody').innerHTML=''
-  const from=dateToTs(document.getElementById('fromDate').value,false)
-  const to=dateToTs(document.getElementById('toDate').value,true)
-  const params=new URLSearchParams({from:from||'',to:to||''})
-  try{
-    const res=await fetch('/api/all-history?'+params,{headers:{'X-Password':_pw}})
-    const data=await res.json()
-    if(!res.ok){status.className='status err';status.textContent='Error: '+(data.message||res.status);return}
-    const items=data.entries||[]
-    if(!items.length){status.className='status';status.textContent='ไม่มีประวัติการซื้อ';return}
-    status.className='status ok';status.textContent=`ทั้งหมด ${items.length} รายการจากทุกผู้เล่น`
-    document.getElementById('sTotal').textContent=items.length.toLocaleString()
-    document.getElementById('sRevenue').textContent='R$ '+items.reduce((s,e)=>s+(e.p||0),0).toLocaleString()
-    document.getElementById('statsRow').style.display='flex'
-    _items=items;_defaultUsername='';resetSortUI()
-    document.getElementById('tbody').innerHTML=renderRows(items,'')
-    document.getElementById('tbl').style.display='table'
-    loadThumbnails(items)
-  }catch(e){status.className='status err';status.textContent='เกิดข้อผิดพลาด: '+e.message}
-}
-
 async function search(){
   const q=document.getElementById('query').value.trim()
-  if(!q){loadAll();return}
   const btn=document.getElementById('searchBtn')
   const status=document.getElementById('status')
+  if(!q){status.className='status err';status.textContent='กรุณากรอกชื่อ Player หรือ User ID';return}
   btn.disabled=true;status.className='status';status.textContent='กำลังค้นหา...'
   document.getElementById('playerInfo').textContent=''
   document.getElementById('statsRow').style.display='none'
@@ -636,6 +619,225 @@ async function loadThumbnails(items){
 </body>
 </html>"""
 
+
+# ── หน้า "รายการซื้อทั้งหมด" แบบแยก URL ลับ (ไม่มี login overlay, ยืนยันตัวด้วย token ใน URL) ──
+ALL_HTML = """<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>รายการซื้อทั้งหมด</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#f0f2f7;color:#1a1a2e;font-family:'Segoe UI',sans-serif;padding:28px 16px}
+h1{color:#1a1a2e;font-size:22px;font-weight:700;margin-bottom:4px}
+.sub{color:#888;font-size:12px;margin-bottom:22px}
+.card{background:#fff;border:1px solid #e4e6ef;border-radius:14px;padding:20px;max-width:780px;margin:0 auto 14px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.card-title{font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.8px;margin-bottom:14px;font-weight:600}
+.btn{padding:10px 24px;background:#4f8ef7;border:none;border-radius:9px;color:#fff;font-size:13px;font-weight:700;cursor:pointer}
+.btn:hover{background:#3a7de8}.btn:disabled{background:#ccc;cursor:default}
+.date-row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.fg{display:flex;flex-direction:column;gap:4px}
+.fg label{font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+input[type=date]{padding:8px 10px;background:#f7f8fc;border:1.5px solid #e4e6ef;border-radius:9px;color:#1a1a2e;font-size:13px;outline:none}
+input[type=date]:focus{border-color:#4f8ef7}
+.qrow{display:flex;gap:6px;align-items:flex-end}
+.qbtn{padding:8px 14px;background:#f7f8fc;border:1.5px solid #e4e6ef;border-radius:9px;color:#888;font-size:12px;cursor:pointer;font-weight:600}
+.qbtn:hover{border-color:#4f8ef7;color:#4f8ef7}
+.qbtn.active{background:#4f8ef7;color:#fff;border-color:#4f8ef7}
+.status{max-width:780px;margin:0 auto 10px;font-size:13px;color:#aaa;min-height:16px}
+.status.err{color:#ef4444}.status.ok{color:#22c55e}
+.stats{max-width:780px;margin:0 auto 14px;display:flex;gap:10px}
+.stat{flex:1;background:#fff;border:1px solid #e4e6ef;border-radius:12px;padding:14px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.stat .val{font-size:22px;font-weight:700;color:#4f8ef7}
+.stat .lbl{font-size:11px;color:#aaa;margin-top:3px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.tbl-wrap{max-width:780px;margin:0 auto;overflow-x:auto}
+table{width:100%;border-collapse:separate;border-spacing:0 5px;font-size:13px}
+thead th{padding:6px 14px;color:#bbb;font-size:11px;text-transform:uppercase;letter-spacing:.5px;text-align:left;font-weight:600}
+tbody tr{background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+tbody tr:hover{box-shadow:0 2px 8px rgba(79,142,247,.15)}
+td{padding:11px 14px;border-top:1px solid #f0f2f7;border-bottom:1px solid #f0f2f7}
+td:first-child{border-left:1px solid #f0f2f7;border-radius:10px 0 0 10px}
+td:last-child{border-right:1px solid #f0f2f7;border-radius:0 10px 10px 0}
+.thumb{width:54px;height:54px;border-radius:8px;object-fit:cover;background:#f0f2f7;display:block}
+.item-name{color:#1a1a2e;font-weight:600}
+.price{color:#f59e0b;font-weight:700}
+.badge{display:inline-block;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:700}
+.ba{background:#eff6ff;color:#3b82f6}.bb{background:#f5f3ff;color:#7c3aed}
+.date-cell{color:#1a1a2e;font-size:13px;font-weight:500}
+.creator{color:#888;font-size:12px}
+.time-cell{color:#aaa;font-size:12px;margin-top:2px}
+.player-col{color:#4f8ef7;font-size:12px;font-weight:600}
+</style>
+</head>
+<body>
+
+<div style="max-width:780px;margin:0 auto 18px">
+  <h1>รายการซื้อทั้งหมด</h1>
+  <div class="sub">ประวัติการซื้อของผู้เล่นทุกคน</div>
+</div>
+
+<div class="card">
+  <div class="card-title">ตัวกรอง</div>
+  <div class="date-row">
+    <div class="fg"><label>จากวันที่</label><input type="date" id="fromDate" onchange="loadAll()"></div>
+    <div class="fg"><label>ถึงวันที่</label><input type="date" id="toDate" onchange="loadAll()"></div>
+    <div class="qrow">
+      <button class="qbtn rbtn" onclick="quickFilter(1)">วันนี้</button>
+      <button class="qbtn rbtn" onclick="quickFilter(7)">7 วัน</button>
+      <button class="qbtn rbtn" onclick="quickFilter(30)">30 วัน</button>
+      <button class="qbtn rbtn active" onclick="quickFilter(0)">ทั้งหมด</button>
+    </div>
+    <div class="qrow">
+      <button class="qbtn" id="sortHighBtn" onclick="sortByPrice('desc')">ราคา: สูง → ต่ำ</button>
+      <button class="qbtn" id="sortLowBtn" onclick="sortByPrice('asc')">ราคา: ต่ำ → สูง</button>
+    </div>
+    <div class="qrow"><button class="btn" onclick="loadAll()">โหลดใหม่</button></div>
+  </div>
+</div>
+
+<div class="status" id="status"></div>
+<div class="stats" id="statsRow" style="display:none">
+  <div class="stat"><div class="val" id="sTotal">0</div><div class="lbl">รายการ</div></div>
+  <div class="stat"><div class="val" id="sRevenue">0</div><div class="lbl">Robux รวม</div></div>
+</div>
+<div class="tbl-wrap">
+  <table id="tbl" style="display:none">
+    <thead><tr><th style="width:66px"></th><th>ผู้เล่น</th><th>สินค้า</th><th>ผู้สร้าง</th><th>ราคา</th><th>ประเภท</th><th>วันที่</th><th>เวลา</th></tr></thead>
+    <tbody id="tbody"></tbody>
+  </table>
+</div>
+
+<script>
+const TOKEN='__VIEW_TOKEN__'
+let _items=[],_itemMap={},_sortMode=null
+function pad(n){return String(n).padStart(2,'0')}
+function fmtParts(ts){
+  const d=new Date(ts*1000)
+  return{
+    date:`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`,
+    time:`${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+  }
+}
+function toISO(ts){const d=new Date(ts*1000);return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`}
+function dateToTs(s,end=false){
+  if(!s)return ''
+  const[y,m,d]=s.split('-').map(Number)
+  return Math.floor(new Date(y,m-1,d,end?23:0,end?59:0,end?59:0).getTime()/1000)
+}
+
+function quickFilter(days){
+  document.querySelectorAll('.rbtn').forEach(b=>b.classList.remove('active'))
+  event.target.classList.add('active')
+  if(!days){document.getElementById('fromDate').value='';document.getElementById('toDate').value=''}
+  else{
+    const now=new Date(),from=new Date(now)
+    from.setDate(now.getDate()-days+1);from.setHours(0,0,0,0)
+    document.getElementById('fromDate').value=toISO(Math.floor(from.getTime()/1000))
+    document.getElementById('toDate').value=toISO(Math.floor(now.getTime()/1000))
+  }
+  loadAll()
+}
+
+function resetSortUI(){
+  _sortMode=null
+  document.getElementById('sortHighBtn').classList.remove('active')
+  document.getElementById('sortLowBtn').classList.remove('active')
+}
+
+function sortByPrice(mode){
+  const btn=document.getElementById(mode==='desc'?'sortHighBtn':'sortLowBtn')
+  if(_sortMode===mode){
+    resetSortUI()
+  }else{
+    _sortMode=mode
+    document.getElementById('sortHighBtn').classList.remove('active')
+    document.getElementById('sortLowBtn').classList.remove('active')
+    btn.classList.add('active')
+  }
+  renderSorted()
+}
+
+function renderSorted(){
+  let items=_items
+  if(_sortMode){
+    items=[..._items].sort((a,b)=>_sortMode==='desc' ? (b.p||0)-(a.p||0) : (a.p||0)-(b.p||0))
+  }
+  document.getElementById('tbody').innerHTML=renderRows(items)
+  applyDetails(items,_itemMap)
+}
+
+function renderRows(items){
+  return items.map(e=>{
+    const isB=e.tp==='B',{date,time}=fmtParts(e.ts)
+    const player=e.username||''
+    return `<tr><td><img class="thumb" data-id="${e.id}" data-tp="${e.tp}" src="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"></td><td class="player-col">${player}</td><td class="item-name" data-id="${e.id}" data-tp="${e.tp}">${e.n||'ID:'+e.id}</td><td><span class="creator" data-id="${e.id}" data-tp="${e.tp}">${e.cr||'...'}</span></td><td class="price" data-id="${e.id}" data-tp="${e.tp}">${e.p?'R$ '+e.p:'ฟรี'}</td><td><span class="badge ${isB?'bb':'ba'}">${isB?'Bundle':'Asset'}</span></td><td><div class="date-cell">${date}</div></td><td><div class="time-cell">${time}</div></td></tr>`
+  }).join('')
+}
+
+function applyDetails(items, map){
+  document.querySelectorAll('img.thumb').forEach(img=>{
+    const key=`${img.dataset.tp}_${img.dataset.id}`
+    if(map[key]?.thumb) img.src=map[key].thumb
+  })
+  document.querySelectorAll('td.item-name[data-id]').forEach(el=>{
+    const key=`${el.dataset.tp}_${el.dataset.id}`
+    const n=map[key]?.name
+    if(n) el.textContent=n
+  })
+  document.querySelectorAll('span.creator').forEach(el=>{
+    const key=`${el.dataset.tp}_${el.dataset.id}`
+    const c=map[key]?.creator
+    if(c) el.textContent=c
+    else if(el.textContent==='...') el.textContent='—'
+  })
+}
+
+async function loadThumbnails(items){
+  try{
+    const unique=[...new Map(items.map(e=>[`${e.tp}_${e.id}`,{id:e.id,tp:e.tp}])).values()]
+    const r=await fetch('/api/item-details',{
+      method:'POST',
+      headers:{'Content-Type':'application/json','X-View-Token':TOKEN},
+      body:JSON.stringify(unique)
+    })
+    _itemMap=await r.json()
+    applyDetails(items,_itemMap)
+  }catch{}
+}
+
+async function loadAll(){
+  const status=document.getElementById('status')
+  status.className='status';status.textContent='กำลังโหลด...'
+  document.getElementById('statsRow').style.display='none'
+  document.getElementById('tbl').style.display='none'
+  document.getElementById('tbody').innerHTML=''
+  const from=dateToTs(document.getElementById('fromDate').value,false)
+  const to=dateToTs(document.getElementById('toDate').value,true)
+  const params=new URLSearchParams({from:from||'',to:to||''})
+  try{
+    const res=await fetch('/api/all-history?'+params,{headers:{'X-View-Token':TOKEN}})
+    if(res.status===401||res.status===403){status.className='status err';status.textContent='ลิงก์ไม่ถูกต้อง';return}
+    const data=await res.json()
+    if(!res.ok){status.className='status err';status.textContent='Error: '+(data.message||res.status);return}
+    const items=data.entries||[]
+    if(!items.length){status.className='status';status.textContent='ไม่มีประวัติการซื้อ';return}
+    status.className='status ok';status.textContent=`ทั้งหมด ${items.length} รายการจากทุกผู้เล่น`
+    document.getElementById('sTotal').textContent=items.length.toLocaleString()
+    document.getElementById('sRevenue').textContent='R$ '+items.reduce((s,e)=>s+(e.p||0),0).toLocaleString()
+    document.getElementById('statsRow').style.display='flex'
+    _items=items;resetSortUI()
+    document.getElementById('tbody').innerHTML=renderRows(items)
+    document.getElementById('tbl').style.display='table'
+    loadThumbnails(items)
+  }catch(e){status.className='status err';status.textContent='เกิดข้อผิดพลาด: '+e.message}
+}
+
+window.addEventListener('DOMContentLoaded',loadAll)
+</script>
+</body>
+</html>"""
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print(f"  {args[0]} {args[1]}")
@@ -643,10 +845,13 @@ class Handler(BaseHTTPRequestHandler):
     def _check_auth(self):
         return self.headers.get("X-Password", "") == PASSWORD
 
+    def _check_view(self):
+        return token_ok(self.headers.get("X-View-Token", ""))
+
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path == "/api/item-details":
-            if not self._check_auth():
+            if not (self._check_auth() or self._check_view()):
                 self._json(401, {"message": "Unauthorized"}); return
             try:
                 length = int(self.headers.get("Content-Length", 0))
@@ -660,6 +865,14 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path.startswith("/all/") and token_ok(parsed.path[5:]):
+            b = ALL_HTML.replace("__VIEW_TOKEN__", VIEW_TOKEN).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html;charset=utf-8")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+            return
         if parsed.path == "/api/debug-creator":
             p   = urllib.parse.parse_qs(parsed.query)
             iid = int((p.get("id") or ["0"])[0])
@@ -693,7 +906,7 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(401, {"message": "Unauthorized"}); return
             self._api(parsed.query)
         elif parsed.path == "/api/all-history":
-            if not self._check_auth():
+            if not (self._check_auth() or self._check_view()):
                 self._json(401, {"message": "Unauthorized"}); return
             self._api_all(parsed.query)
         elif parsed.path == "/api/debug-list-keys":

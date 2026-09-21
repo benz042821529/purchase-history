@@ -22,6 +22,10 @@ def token_ok(given):
 BASE    = f"https://apis.roblox.com/datastores/v1/universes/{UNIVERSE_ID}"
 DS_NAME = "PurchaseLog_v1"
 
+# สรุปยอดค่าคอมต่อคน (เขียนโดย ServerScriptService.Admin.PurchaseHistoryServer ฝั่งเกม)
+COMMISSION_DS_NAME = "PurchaseBuyersIndex_v1"
+COMMISSION_KEY     = "AllBuyers"
+
 # --- simple in-memory TTL cache ---
 _cache = {}
 _cache_lock = threading.Lock()
@@ -160,6 +164,22 @@ def _thumb_batch(ids, kind):
                     out[x["targetId"]] = x["imageUrl"]
         except Exception as e:
             print(f"[thumb {kind}] {e}")
+    return out
+
+
+def fetch_avatars(uids):
+    """ดึง avatar headshot ของผู้เล่นเป็นชุด -> {userId: imageUrl} เฉพาะที่ state=Completed"""
+    out = {}
+    base = "https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={}&size=150x150&format=Png&isCircular=true"
+    for i in range(0, len(uids), 100):
+        chunk = ",".join(str(x) for x in uids[i:i + 100])
+        try:
+            d = roblox_public(base.format(chunk))
+            for x in d.get("data", []):
+                if x.get("state") == "Completed" and x.get("imageUrl"):
+                    out[x["targetId"]] = x["imageUrl"]
+        except Exception as e:
+            print(f"[avatars] {e}")
     return out
 
 
@@ -355,6 +375,77 @@ def fetch_all_history(from_ts=None, to_ts=None):
     all_entries.sort(key=lambda x: x["ts"], reverse=True)
     cache_set(ck, all_entries)
     return all_entries
+
+
+# ต้องตรงกับ COMMISSION_MIN_PRICE ใน ServerScriptService.Admin.PurchaseHistoryServer (ฝั่งเกม)
+COMMISSION_MIN_PRICE = 5
+# ค่าคอมจริงที่จ่าย = 40% ของยอดที่เข้าเกณฑ์ (commissionBase คือยอด "ฐาน" ก่อนคูณเปอร์เซ็นต์ ไม่ใช่ยอดจ่ายจริง -- ยังไม่เคยคูณใน Studio เลย ทำตรงนี้ที่เดียว)
+COMMISSION_RATE = 0.40
+
+def entry_earns_commission(e):
+    if (e.get("p") or 0) < COMMISSION_MIN_PRICE:
+        return False
+    if e.get("tp") == "B":
+        return True
+    return not e.get("lim")
+
+
+def fetch_commission_data():
+    """สรุปยอดค่าคอมของทุกคน (totalSpent/commissionBase/purchaseCount/lastTs) จาก PurchaseBuyersIndex_v1 -- ยอดสะสมทั้งหมด ยังไม่หักส่วนที่จ่ายไปแล้ว"""
+    ck = ("commission",)
+    cached = cache_get(ck, 120)
+    if cached is not None:
+        return cached
+    try:
+        data = roblox_get(
+            f"{BASE}/standard-datastores/datastore/entries/entry",
+            {"datastoreName": COMMISSION_DS_NAME, "entryKey": COMMISSION_KEY}
+        )
+    except urllib.error.HTTPError as e:
+        if e.code == 404:
+            data = []
+        else:
+            raise
+    if not isinstance(data, list):
+        data = []
+    data.sort(key=lambda x: x.get("commissionBase", 0), reverse=True)
+
+    avatars = fetch_avatars([b["userId"] for b in data if b.get("userId")])
+    for b in data:
+        b["avatar"] = avatars.get(b.get("userId"), "")
+
+    for b in data:
+        b["commissionPay"] = round((b.get("commissionBase") or 0) * COMMISSION_RATE, 2)
+
+    cache_set(ck, data)
+    return data
+
+
+def fetch_commission_data_ranged(from_ts, to_ts):
+    """สรุปยอดค่าคอมเฉพาะที่ซื้อในช่วงวันที่ที่กำหนด (ไล่สแกนทุก entry จริงในช่วงนั้น ไม่ใช่ยอดสะสมทั้งหมด)"""
+    entries = fetch_all_history(from_ts, to_ts)
+    byUid = {}
+    for e in entries:
+        uid = e["uid"]
+        row = byUid.setdefault(uid, {
+            "userId": uid, "username": e.get("username", str(uid)), "displayName": None,
+            "totalSpent": 0, "commissionBase": 0, "purchaseCount": 0, "lastTs": 0,
+        })
+        row["totalSpent"] += (e.get("p") or 0)
+        if entry_earns_commission(e):
+            row["commissionBase"] += (e.get("p") or 0)
+        row["purchaseCount"] += 1
+        row["lastTs"] = max(row["lastTs"], e.get("ts") or 0)
+
+    data = list(byUid.values())
+    data.sort(key=lambda x: x.get("commissionBase", 0), reverse=True)
+
+    avatars = fetch_avatars([b["userId"] for b in data])
+    for b in data:
+        b["avatar"] = avatars.get(b["userId"], "")
+        b["commissionPay"] = round((b.get("commissionBase") or 0) * COMMISSION_RATE, 2)
+
+    return data
 
 
 HTML = """<!DOCTYPE html>
@@ -838,6 +929,287 @@ window.addEventListener('DOMContentLoaded',loadAll)
 </body>
 </html>"""
 
+# ── หน้า "ค่าคอมมิชชั่น" แบบแยก URL ลับ (เหมือน /all/ ใครมีลิงก์ก็ดูได้ ไม่ต้อง login) ──
+COMMISSION_HTML = """<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ค่าคอมมิชชั่น</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#f0f2f7;color:#1a1a2e;font-family:'Segoe UI',sans-serif;padding:28px 16px}
+h1{color:#1a1a2e;font-size:22px;font-weight:700;margin-bottom:4px}
+.sub{color:#888;font-size:12px;margin-bottom:22px}
+.btn{padding:10px 24px;background:#4f8ef7;border:none;border-radius:9px;color:#fff;font-size:13px;font-weight:700;cursor:pointer}
+.btn:hover{background:#3a7de8}.btn:disabled{background:#ccc;cursor:default}
+.back{display:none;padding:8px 16px;background:#fff;border:1.5px solid #e4e6ef;border-radius:9px;color:#4f8ef7;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:14px}
+.back:hover{border-color:#4f8ef7}
+.status{max-width:960px;margin:0 auto 10px;font-size:13px;color:#aaa;min-height:16px}
+.status.err{color:#ef4444}.status.ok{color:#22c55e}
+.stats{max-width:960px;margin:0 auto 14px;display:flex;gap:10px;flex-wrap:wrap}
+.stat{flex:1;min-width:120px;background:#fff;border:1px solid #e4e6ef;border-radius:12px;padding:14px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.stat .val{font-size:22px;font-weight:700;color:#4f8ef7}
+.stat .lbl{font-size:11px;color:#aaa;margin-top:3px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.tbl-wrap{max-width:960px;margin:0 auto;overflow-x:auto}
+table{width:100%;border-collapse:separate;border-spacing:0 5px;font-size:13px}
+thead th{padding:6px 14px;color:#bbb;font-size:11px;text-transform:uppercase;letter-spacing:.5px;text-align:left;font-weight:600}
+tbody tr{background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+tbody tr.clickable{cursor:pointer}
+tbody tr.clickable:hover{box-shadow:0 2px 8px rgba(79,142,247,.15)}
+td{padding:11px 14px;border-top:1px solid #f0f2f7;border-bottom:1px solid #f0f2f7}
+td:first-child{border-left:1px solid #f0f2f7;border-radius:10px 0 0 10px}
+td:last-child{border-right:1px solid #f0f2f7;border-radius:0 10px 10px 0}
+.rank{color:#bbb;font-weight:700;font-size:13px}
+.name-cell{color:#1a1a2e;font-weight:700}
+.uid-cell{color:#aaa;font-size:11px;margin-top:2px}
+.money{color:#f59e0b;font-weight:700}
+.comm{color:#22c55e;font-weight:700}
+.item-name{color:#1a1a2e;font-weight:600}
+.price{color:#f59e0b;font-weight:700}
+.badge{display:inline-block;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:700}
+.ba{background:#eff6ff;color:#3b82f6}.bb{background:#f5f3ff;color:#7c3aed}
+.cyes{background:#f0fdf4;color:#22c55e}.cno{background:#f9fafb;color:#9ca3af}
+.date-cell{color:#1a1a2e;font-size:13px;font-weight:500}
+.time-cell{color:#aaa;font-size:12px;margin-top:2px}
+.creator{color:#888;font-size:12px}
+.thumb{width:48px;height:48px;border-radius:8px;object-fit:cover;background:#f0f2f7;display:block}
+.wide{max-width:960px}
+.card{background:#fff;border:1px solid #e4e6ef;border-radius:14px;padding:16px 20px;max-width:960px;margin:0 auto 14px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.date-row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.fg{display:flex;flex-direction:column;gap:4px}
+.fg label{font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+input[type=date]{padding:8px 10px;background:#f7f8fc;border:1.5px solid #e4e6ef;border-radius:9px;color:#1a1a2e;font-size:13px;outline:none}
+input[type=date]:focus{border-color:#4f8ef7}
+.qrow{display:flex;gap:6px;align-items:flex-end}
+.qbtn{padding:8px 14px;background:#f7f8fc;border:1.5px solid #e4e6ef;border-radius:9px;color:#888;font-size:12px;cursor:pointer;font-weight:600}
+.qbtn:hover{border-color:#4f8ef7;color:#4f8ef7}
+.qbtn.active{background:#4f8ef7;color:#fff;border-color:#4f8ef7}
+</style>
+</head>
+<body>
+
+<div style="max-width:960px;margin:0 auto 18px">
+  <h1>ค่าคอมมิชชั่น</h1>
+  <div class="sub">ค่าคอม = 40% ของยอดที่เข้าเกณฑ์ (ไม่นับไอเทม &lt;5 Robux และ Limited) — ยอดสะสมทั้งหมด ยังไม่หักส่วนที่จ่ายไปแล้ว กดชื่อเพื่อดูรายการซื้อ</div>
+</div>
+
+<button class="back" id="backBtn" onclick="showList()">← กลับไปรายชื่อทั้งหมด</button>
+
+<div class="status" id="status"></div>
+
+<div id="listView">
+  <div class="card">
+    <div class="date-row">
+      <div class="fg"><label>จากวันที่</label><input type="date" id="listFromDate" onchange="loadList()"></div>
+      <div class="fg"><label>ถึงวันที่</label><input type="date" id="listToDate" onchange="loadList()"></div>
+      <div class="qrow">
+        <button class="qbtn" onclick="listQuickFilter(1)">วันนี้</button>
+        <button class="qbtn" onclick="listQuickFilter(7)">7 วัน</button>
+        <button class="qbtn" onclick="listQuickFilter(30)">30 วัน</button>
+        <button class="qbtn active" onclick="listQuickFilter(0)">ทั้งหมด</button>
+      </div>
+    </div>
+  </div>
+  <div class="stats" id="listStats" style="display:none">
+    <div class="stat"><div class="val" id="sPeople">0</div><div class="lbl">คนที่ซื้อ</div></div>
+    <div class="stat"><div class="val" id="sCommTotal">0</div><div class="lbl">ค่าคอมรวม (Robux)</div></div>
+  </div>
+  <div class="tbl-wrap">
+    <table id="listTbl" style="display:none">
+      <thead><tr><th>#</th><th style="width:52px"></th><th>ผู้เล่น</th><th>ยอดซื้อรวม</th><th>ฐานค่าคอม</th><th>ค่าคอม 40%</th><th>จำนวนครั้ง</th><th>ซื้อล่าสุด</th></tr></thead>
+      <tbody id="listBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<div id="detailView" style="display:none">
+  <div class="card">
+    <div class="date-row">
+      <div class="fg"><label>จากวันที่</label><input type="date" id="fromDate" onchange="renderDetail()"></div>
+      <div class="fg"><label>ถึงวันที่</label><input type="date" id="toDate" onchange="renderDetail()"></div>
+      <div class="qrow">
+        <button class="qbtn" onclick="quickFilter(7)">7 วัน</button>
+        <button class="qbtn" onclick="quickFilter(30)">30 วัน</button>
+        <button class="qbtn active" onclick="quickFilter(0)">ทั้งหมด</button>
+      </div>
+    </div>
+  </div>
+  <div class="stats" id="detailStats">
+    <div class="stat"><div class="val" id="dItems">0</div><div class="lbl">รายการที่ซื้อ</div></div>
+    <div class="stat"><div class="val" id="dAssets">0</div><div class="lbl">Asset</div></div>
+    <div class="stat"><div class="val" id="dBundles">0</div><div class="lbl">Bundle</div></div>
+    <div class="stat"><div class="val" id="dSpent">0</div><div class="lbl">ยอดซื้อรวม</div></div>
+    <div class="stat"><div class="val" id="dCommBase">0</div><div class="lbl">ฐานค่าคอม</div></div>
+    <div class="stat"><div class="val" id="dComm">0</div><div class="lbl">ค่าคอม 40%</div></div>
+  </div>
+  <div class="tbl-wrap">
+    <table id="detailTbl">
+      <thead><tr><th style="width:60px"></th><th>สินค้า</th><th>ผู้สร้าง</th><th>ราคา</th><th>ประเภท</th><th>นับค่าคอม</th><th>วันที่</th><th>เวลา</th></tr></thead>
+      <tbody id="detailBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const TOKEN='__VIEW_TOKEN__'
+function pad(n){return String(n).padStart(2,'0')}
+function fmtParts(ts){
+  const d=new Date(ts*1000)
+  return{date:`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`,time:`${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`}
+}
+
+function showList(){
+  document.getElementById('detailView').style.display='none'
+  document.getElementById('listView').style.display='block'
+  document.getElementById('backBtn').style.display='none'
+  history.replaceState(null,'','#')
+}
+
+const BLANK_PX="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+const COMMISSION_RATE=0.40
+function fmtR(n){return 'R$ '+(n||0).toLocaleString(undefined,{maximumFractionDigits:2})}
+function renderList(rows){
+  document.getElementById('listBody').innerHTML=rows.map((b,i)=>{
+    const name=b.displayName||b.username||('ID '+b.userId)
+    const last=b.lastTs?fmtParts(b.lastTs).date:'-'
+    const pay=b.commissionPay!=null?b.commissionPay:(b.commissionBase||0)*COMMISSION_RATE
+    return `<tr class="clickable" onclick="openDetail(${b.userId},'${(name+'').replace(/'/g,"\\\\'")}')">
+      <td class="rank">${i+1}</td>
+      <td><img class="thumb" src="${b.avatar||BLANK_PX}"></td>
+      <td><div class="name-cell">${name}</div><div class="uid-cell">User ID ${b.userId}${b.username&&b.username!==name?' · @'+b.username:''}</div></td>
+      <td class="money">${fmtR(b.totalSpent)}</td>
+      <td>${fmtR(b.commissionBase)}</td>
+      <td class="comm">${fmtR(pay)}</td>
+      <td>${b.purchaseCount||0}</td>
+      <td class="date-cell">${last}</td>
+    </tr>`
+  }).join('')
+}
+
+function listQuickFilter(days){
+  document.querySelectorAll('#listView .qbtn').forEach(b=>b.classList.remove('active'))
+  event.target.classList.add('active')
+  if(!days){document.getElementById('listFromDate').value='';document.getElementById('listToDate').value=''}
+  else{
+    const now=new Date(),from=new Date(now)
+    from.setDate(now.getDate()-days+1);from.setHours(0,0,0,0)
+    document.getElementById('listFromDate').value=toISO(Math.floor(from.getTime()/1000))
+    document.getElementById('listToDate').value=toISO(Math.floor(now.getTime()/1000))
+  }
+  loadList()
+}
+
+async function loadList(){
+  const status=document.getElementById('status')
+  status.className='status';status.textContent='กำลังโหลด...'
+  document.getElementById('listStats').style.display='none'
+  document.getElementById('listTbl').style.display='none'
+  const from=dateToTs(document.getElementById('listFromDate').value,false)
+  const to=dateToTs(document.getElementById('listToDate').value,true)
+  const params=new URLSearchParams({token:TOKEN})
+  if(from!==null)params.set('from',from)
+  if(to!==null)params.set('to',to)
+  try{
+    const res=await fetch('/api/commission?'+params)
+    if(res.status===401||res.status===403){status.className='status err';status.textContent='ลิงก์ไม่ถูกต้อง';return}
+    const data=await res.json()
+    if(!res.ok){status.className='status err';status.textContent='Error: '+(data.message||res.status);return}
+    const rows=data.buyers||[]
+    document.querySelector('#listStats .lbl').textContent=data.ranged?'คนที่ซื้อในช่วงนี้':'คนที่เคยซื้อ'
+    document.querySelectorAll('#listStats .lbl')[1].textContent=(data.ranged?'ค่าคอม 40% ในช่วงนี้':'ค่าคอม 40% รวมทั้งหมด')+' (Robux)'
+    if(!rows.length){status.className='status';status.textContent=data.ranged?'ไม่มีใครซื้อในช่วงวันที่นี้':'ยังไม่มีข้อมูลการซื้อ';return}
+    status.textContent=''
+    document.getElementById('sPeople').textContent=rows.length.toLocaleString()
+    document.getElementById('sCommTotal').textContent=fmtR(rows.reduce((s,b)=>s+(b.commissionPay!=null?b.commissionPay:(b.commissionBase||0)*COMMISSION_RATE),0))
+    document.getElementById('listStats').style.display='flex'
+    renderList(rows)
+    document.getElementById('listTbl').style.display='table'
+  }catch(e){status.className='status err';status.textContent='เกิดข้อผิดพลาด: '+e.message}
+}
+
+function dateToTs(s,end=false){
+  if(!s)return null
+  const[y,m,d]=s.split('-').map(Number)
+  return Math.floor(new Date(y,m-1,d,end?23:0,end?59:0,end?59:0).getTime()/1000)
+}
+function toISO(ts){const d=new Date(ts*1000);return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`}
+
+function quickFilter(days){
+  document.querySelectorAll('#detailView .qbtn').forEach(b=>b.classList.remove('active'))
+  event.target.classList.add('active')
+  if(!days){document.getElementById('fromDate').value='';document.getElementById('toDate').value=''}
+  else{
+    const now=new Date(),from=new Date(now)
+    from.setDate(now.getDate()-days+1);from.setHours(0,0,0,0)
+    document.getElementById('fromDate').value=toISO(Math.floor(from.getTime()/1000))
+    document.getElementById('toDate').value=toISO(Math.floor(now.getTime()/1000))
+  }
+  renderDetail()
+}
+
+let _detailItems=[],_detailName='',_detailUid=0
+
+function renderDetail(){
+  const from=dateToTs(document.getElementById('fromDate').value,false)
+  const to=dateToTs(document.getElementById('toDate').value,true)
+  const items=_detailItems.filter(e=>(from===null||e.ts>=from)&&(to===null||e.ts<=to))
+
+  document.getElementById('status').className='status ok'
+  document.getElementById('status').textContent=_detailName+' (ID '+_detailUid+')'+(from||to?' — กรองตามช่วงวันที่':'')
+  document.getElementById('dItems').textContent=items.length.toLocaleString()
+  document.getElementById('dAssets').textContent=items.filter(e=>e.tp!=='B').length.toLocaleString()
+  document.getElementById('dBundles').textContent=items.filter(e=>e.tp==='B').length.toLocaleString()
+  document.getElementById('dSpent').textContent=fmtR(items.reduce((s,e)=>s+(e.p||0),0))
+  const commBase=items.filter(e=>e.earns).reduce((s,e)=>s+(e.p||0),0)
+  document.getElementById('dCommBase').textContent=fmtR(commBase)
+  document.getElementById('dComm').textContent=fmtR(commBase*COMMISSION_RATE)
+  document.getElementById('detailBody').innerHTML=items.map(e=>{
+    const isB=e.tp==='B',{date,time}=fmtParts(e.ts)
+    return `<tr>
+      <td><img class="thumb" src="${e.thumb||BLANK_PX}"></td>
+      <td class="item-name">${e.nm||('ID:'+e.id)}</td>
+      <td><span class="creator">${e.cr||'—'}</span></td>
+      <td class="price">${e.p?'R$ '+e.p:'ฟรี'}</td>
+      <td><span class="badge ${isB?'bb':'ba'}">${isB?'Bundle':'Asset'}</span></td>
+      <td><span class="badge ${e.earns?'cyes':'cno'}">${e.earns?'✓ นับ':'ไม่นับ'}</span></td>
+      <td><div class="date-cell">${date}</div></td>
+      <td><div class="time-cell">${time}</div></td>
+    </tr>`
+  }).join('')
+}
+
+async function openDetail(uid,name){
+  const status=document.getElementById('status')
+  document.getElementById('listView').style.display='none'
+  document.getElementById('detailView').style.display='block'
+  document.getElementById('backBtn').style.display='inline-block'
+  document.getElementById('fromDate').value='';document.getElementById('toDate').value=''
+  document.querySelectorAll('#detailView .qbtn').forEach(b=>b.classList.remove('active'))
+  document.querySelector('#detailView .qbtn:last-child').classList.add('active')
+  history.replaceState(null,'','#u='+uid)
+  status.className='status';status.textContent='กำลังโหลดรายการของ '+name+'...'
+  document.getElementById('detailBody').innerHTML=''
+  try{
+    const res=await fetch('/api/commission-detail?token='+encodeURIComponent(TOKEN)+'&uid='+uid)
+    if(res.status===401||res.status===403){status.className='status err';status.textContent='ลิงก์ไม่ถูกต้อง';return}
+    const data=await res.json()
+    if(!res.ok){status.className='status err';status.textContent='Error: '+(data.message||res.status);return}
+    _detailItems=data.entries||[];_detailName=name;_detailUid=uid
+    renderDetail()
+  }catch(e){status.className='status err';status.textContent='เกิดข้อผิดพลาด: '+e.message}
+}
+
+// เปิดตรงเข้ารายละเอียดได้ถ้ามี #u=<userId> ติดมาใน URL (เผื่อแชร์ลิงก์เฉพาะคน)
+window.addEventListener('DOMContentLoaded',()=>{
+  const m=location.hash.match(/^#u=(\\d+)/)
+  if(m){openDetail(Number(m[1]),'ID '+m[1])}
+  else{loadList()}
+})
+</script>
+</body>
+</html>"""
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print(f"  {args[0]} {args[1]}")
@@ -867,6 +1239,14 @@ class Handler(BaseHTTPRequestHandler):
         parsed = urllib.parse.urlparse(self.path)
         if parsed.path.startswith("/all/") and token_ok(parsed.path[5:]):
             b = ALL_HTML.replace("__VIEW_TOKEN__", VIEW_TOKEN).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html;charset=utf-8")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+            return
+        if parsed.path.startswith("/commission/") and token_ok(parsed.path[len("/commission/"):]):
+            b = COMMISSION_HTML.replace("__VIEW_TOKEN__", VIEW_TOKEN).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html;charset=utf-8")
             self.send_header("Content-Length", str(len(b)))
@@ -909,6 +1289,34 @@ class Handler(BaseHTTPRequestHandler):
             if not (self._check_auth() or self._check_view()):
                 self._json(401, {"message": "Unauthorized"}); return
             self._api_all(parsed.query)
+        elif parsed.path == "/api/commission":
+            p     = urllib.parse.parse_qs(parsed.query)
+            token = (p.get("token") or [""])[0]
+            if not (self._check_auth() or self._check_view() or token_ok(token)):
+                self._json(401, {"message": "Unauthorized"}); return
+            from_s = (p.get("from") or [""])[0]
+            to_s   = (p.get("to")   or [""])[0]
+            from_ts = float(from_s) if from_s else None
+            to_ts   = float(to_s)   if to_s   else None
+            try:
+                if from_ts or to_ts:
+                    buyers = fetch_commission_data_ranged(from_ts, to_ts)
+                else:
+                    buyers = fetch_commission_data()
+                self._json(200, {"buyers": buyers, "ranged": bool(from_ts or to_ts)})
+            except Exception as e:
+                print(f"[commission error] {e}")
+                self._json(500, {"message": str(e)})
+        elif parsed.path == "/api/commission-detail":
+            p     = urllib.parse.parse_qs(parsed.query)
+            token = (p.get("token") or [""])[0]
+            if not (self._check_auth() or self._check_view() or token_ok(token)):
+                self._json(401, {"message": "Unauthorized"}); return
+            try:
+                uid = int((p.get("uid") or ["0"])[0])
+            except ValueError:
+                self._json(400, {"message": "invalid uid"}); return
+            self._api_commission_detail(uid)
         elif parsed.path == "/api/debug-list-keys":
             if not self._check_auth():
                 self._json(401, {"message": "Unauthorized"}); return
@@ -967,6 +1375,26 @@ class Handler(BaseHTTPRequestHandler):
             self._json(200, {"entries": entries, "total": len(entries)})
         except Exception as e:
             print(f"[all-history error] {e}")
+            self._json(500, {"message": str(e)})
+
+    def _api_commission_detail(self, uid):
+        try:
+            entries = fetch_history(uid)
+            if entries is None:
+                self._json(500, {"message": "DataStore error"}); return
+            for e in entries:
+                e["earns"] = entry_earns_commission(e)
+            # เติมชื่อ/ผู้สร้าง/thumbnail ให้ครบ (cache รายชิ้นอยู่แล้วใน fetch_item_details)
+            details = fetch_item_details(entries) if entries else {}
+            for e in entries:
+                d = details.get(f"{e['tp']}_{e['id']}")
+                if d:
+                    e["nm"]    = d.get("name") or e.get("nm") or ""
+                    e["cr"]    = d.get("creator", "")
+                    e["thumb"] = d.get("thumb", "")
+            self._json(200, {"entries": entries})
+        except Exception as e:
+            print(f"[commission-detail error] {e}")
             self._json(500, {"message": str(e)})
 
     def _json(self, code, data):

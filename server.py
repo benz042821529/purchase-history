@@ -380,6 +380,7 @@ def fetch_all_history(from_ts=None, to_ts=None):
 # ต้องตรงกับ COMMISSION_MIN_PRICE ใน ServerScriptService.Admin.PurchaseHistoryServer (ฝั่งเกม)
 COMMISSION_MIN_PRICE = 5
 # ค่าคอมจริงที่จ่าย = 40% ของยอดที่เข้าเกณฑ์ (commissionBase คือยอด "ฐาน" ก่อนคูณเปอร์เซ็นต์ ไม่ใช่ยอดจ่ายจริง -- ยังไม่เคยคูณใน Studio เลย ทำตรงนี้ที่เดียว)
+# 40% นี้แบ่งเป็น 2 ส่วนเท่ากัน: คนซื้อได้ 20% (buyerPay) + เจ้าของแมพได้ 20% (ownerPay) -- หารจาก commissionPay ที่ปัดแล้ว ไม่ใช่คำนวณ 20% แยก 2 รอบ กันผลรวมคลาดเคลื่อนจากการปัดเศษซ้ำ
 COMMISSION_RATE = 0.40
 
 def entry_earns_commission(e):
@@ -416,6 +417,8 @@ def fetch_commission_data():
 
     for b in data:
         b["commissionPay"] = round((b.get("commissionBase") or 0) * COMMISSION_RATE, 2)
+        b["buyerPay"] = round(b["commissionPay"] / 2, 2)
+        b["ownerPay"] = round(b["commissionPay"] - b["buyerPay"], 2)
 
     cache_set(ck, data)
     return data
@@ -444,6 +447,8 @@ def fetch_commission_data_ranged(from_ts, to_ts):
     for b in data:
         b["avatar"] = avatars.get(b["userId"], "")
         b["commissionPay"] = round((b.get("commissionBase") or 0) * COMMISSION_RATE, 2)
+        b["buyerPay"] = round(b["commissionPay"] / 2, 2)
+        b["ownerPay"] = round(b["commissionPay"] - b["buyerPay"], 2)
 
     return data
 
@@ -1013,11 +1018,12 @@ input[type=date]:focus{border-color:#4f8ef7}
   </div>
   <div class="stats" id="listStats" style="display:none">
     <div class="stat"><div class="val" id="sPeople">0</div><div class="lbl">คนที่ซื้อ</div></div>
-    <div class="stat"><div class="val" id="sCommTotal">0</div><div class="lbl">ค่าคอมรวม (Robux)</div></div>
+    <div class="stat"><div class="val" id="sBuyerTotal">0</div><div class="lbl">คนซื้อได้รวม 20% (Robux)</div></div>
+    <div class="stat"><div class="val" id="sOwnerTotal">0</div><div class="lbl">เจ้าของแมพได้รวม 20% (Robux)</div></div>
   </div>
   <div class="tbl-wrap">
     <table id="listTbl" style="display:none">
-      <thead><tr><th>#</th><th style="width:52px"></th><th>ผู้เล่น</th><th>ยอดซื้อรวม</th><th>ฐานค่าคอม</th><th>ค่าคอม 40%</th><th>จำนวนครั้ง</th><th>ซื้อล่าสุด</th></tr></thead>
+      <thead><tr><th>#</th><th style="width:52px"></th><th>ผู้เล่น</th><th>ยอดซื้อรวม</th><th>ฐานค่าคอม</th><th>คนซื้อได้ 20%</th><th>เจ้าของแมพได้ 20%</th><th>จำนวนครั้ง</th><th>ซื้อล่าสุด</th></tr></thead>
       <tbody id="listBody"></tbody>
     </table>
   </div>
@@ -1041,7 +1047,8 @@ input[type=date]:focus{border-color:#4f8ef7}
     <div class="stat"><div class="val" id="dBundles">0</div><div class="lbl">Bundle</div></div>
     <div class="stat"><div class="val" id="dSpent">0</div><div class="lbl">ยอดซื้อรวม</div></div>
     <div class="stat"><div class="val" id="dCommBase">0</div><div class="lbl">ฐานค่าคอม</div></div>
-    <div class="stat"><div class="val" id="dComm">0</div><div class="lbl">ค่าคอม 40%</div></div>
+    <div class="stat"><div class="val" id="dBuyerPay">0</div><div class="lbl">คนซื้อได้ 20%</div></div>
+    <div class="stat"><div class="val" id="dOwnerPay">0</div><div class="lbl">เจ้าของแมพได้ 20%</div></div>
   </div>
   <div class="tbl-wrap">
     <table id="detailTbl">
@@ -1069,18 +1076,23 @@ function showList(){
 const BLANK_PX="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
 const COMMISSION_RATE=0.40
 function fmtR(n){return 'R$ '+(n||0).toLocaleString(undefined,{maximumFractionDigits:2})}
+// แบ่งค่าคอม 40% (ที่คำนวณแล้ว) ออกเป็น 2 ส่วนเท่าๆ -- หารจากยอดที่ได้แล้ว ไม่คำนวณ 20% แยก 2 รอบ (กันคลาดเคลื่อนจากการปัดเศษซ้ำ)
+function splitComm(total){const buyer=Math.round((total/2)*100)/100;return{buyer,owner:Math.round((total-buyer)*100)/100}}
 function renderList(rows){
   document.getElementById('listBody').innerHTML=rows.map((b,i)=>{
     const name=b.displayName||b.username||('ID '+b.userId)
     const last=b.lastTs?fmtParts(b.lastTs).date:'-'
     const pay=b.commissionPay!=null?b.commissionPay:(b.commissionBase||0)*COMMISSION_RATE
+    const buyerPay=b.buyerPay!=null?b.buyerPay:splitComm(pay).buyer
+    const ownerPay=b.ownerPay!=null?b.ownerPay:splitComm(pay).owner
     return `<tr class="clickable" onclick="openDetail(${b.userId},'${(name+'').replace(/'/g,"\\\\'")}')">
       <td class="rank">${i+1}</td>
       <td><img class="thumb" src="${b.avatar||BLANK_PX}"></td>
       <td><div class="name-cell">${name}</div><div class="uid-cell">User ID ${b.userId}${b.username&&b.username!==name?' · @'+b.username:''}</div></td>
       <td class="money">${fmtR(b.totalSpent)}</td>
       <td>${fmtR(b.commissionBase)}</td>
-      <td class="comm">${fmtR(pay)}</td>
+      <td class="comm">${fmtR(buyerPay)}</td>
+      <td class="comm">${fmtR(ownerPay)}</td>
       <td>${b.purchaseCount||0}</td>
       <td class="date-cell">${last}</td>
     </tr>`
@@ -1117,11 +1129,13 @@ async function loadList(){
     if(!res.ok){status.className='status err';status.textContent='Error: '+(data.message||res.status);return}
     const rows=data.buyers||[]
     document.querySelector('#listStats .lbl').textContent=data.ranged?'คนที่ซื้อในช่วงนี้':'คนที่เคยซื้อ'
-    document.querySelectorAll('#listStats .lbl')[1].textContent=(data.ranged?'ค่าคอม 40% ในช่วงนี้':'ค่าคอม 40% รวมทั้งหมด')+' (Robux)'
+    document.querySelectorAll('#listStats .lbl')[1].textContent=(data.ranged?'คนซื้อได้รวม 20% ในช่วงนี้':'คนซื้อได้รวม 20% ทั้งหมด')+' (Robux)'
+    document.querySelectorAll('#listStats .lbl')[2].textContent=(data.ranged?'เจ้าของแมพได้รวม 20% ในช่วงนี้':'เจ้าของแมพได้รวม 20% ทั้งหมด')+' (Robux)'
     if(!rows.length){status.className='status';status.textContent=data.ranged?'ไม่มีใครซื้อในช่วงวันที่นี้':'ยังไม่มีข้อมูลการซื้อ';return}
     status.textContent=''
     document.getElementById('sPeople').textContent=rows.length.toLocaleString()
-    document.getElementById('sCommTotal').textContent=fmtR(rows.reduce((s,b)=>s+(b.commissionPay!=null?b.commissionPay:(b.commissionBase||0)*COMMISSION_RATE),0))
+    document.getElementById('sBuyerTotal').textContent=fmtR(rows.reduce((s,b)=>{const pay=b.commissionPay!=null?b.commissionPay:(b.commissionBase||0)*COMMISSION_RATE;return s+(b.buyerPay!=null?b.buyerPay:splitComm(pay).buyer)},0))
+    document.getElementById('sOwnerTotal').textContent=fmtR(rows.reduce((s,b)=>{const pay=b.commissionPay!=null?b.commissionPay:(b.commissionBase||0)*COMMISSION_RATE;return s+(b.ownerPay!=null?b.ownerPay:splitComm(pay).owner)},0))
     document.getElementById('listStats').style.display='flex'
     renderList(rows)
     document.getElementById('listTbl').style.display='table'
@@ -1163,7 +1177,9 @@ function renderDetail(){
   document.getElementById('dSpent').textContent=fmtR(items.reduce((s,e)=>s+(e.p||0),0))
   const commBase=items.filter(e=>e.earns).reduce((s,e)=>s+(e.p||0),0)
   document.getElementById('dCommBase').textContent=fmtR(commBase)
-  document.getElementById('dComm').textContent=fmtR(commBase*COMMISSION_RATE)
+  const {buyer:dBuyerPay,owner:dOwnerPay}=splitComm(commBase*COMMISSION_RATE)
+  document.getElementById('dBuyerPay').textContent=fmtR(dBuyerPay)
+  document.getElementById('dOwnerPay').textContent=fmtR(dOwnerPay)
   document.getElementById('detailBody').innerHTML=items.map(e=>{
     const isB=e.tp==='B',{date,time}=fmtParts(e.ts)
     return `<tr>

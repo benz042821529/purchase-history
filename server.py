@@ -379,6 +379,8 @@ def fetch_all_history(from_ts=None, to_ts=None):
 
 # ต้องตรงกับ COMMISSION_MIN_PRICE ใน ServerScriptService.Admin.PurchaseHistoryServer (ฝั่งเกม)
 COMMISSION_MIN_PRICE = 5
+# เจ้าของแมพ (AdminConfig.OWNER_ID ฝั่งเกม) -- ของที่เจ้าของซื้อเองไม่นับเข้าค่าคอมเลย (เหมือน COMMISSION_EXCLUDED_IDS ใน PurchaseHistoryPanel.lua)
+OWNER_ID = 8486039661
 # ค่าคอมจริงที่จ่าย = 40% ของยอดที่เข้าเกณฑ์ (commissionBase คือยอด "ฐาน" ก่อนคูณเปอร์เซ็นต์ ไม่ใช่ยอดจ่ายจริง -- ยังไม่เคยคูณใน Studio เลย ทำตรงนี้ที่เดียว)
 # 40% นี้แบ่งเป็น 2 ส่วนเท่ากัน: คนซื้อได้ 20% (buyerPay) + เจ้าของแมพได้ 20% (ownerPay) -- หารจาก commissionPay ที่ปัดแล้ว ไม่ใช่คำนวณ 20% แยก 2 รอบ กันผลรวมคลาดเคลื่อนจากการปัดเศษซ้ำ
 COMMISSION_RATE = 0.40
@@ -416,7 +418,9 @@ def fetch_commission_data():
         b["avatar"] = avatars.get(b.get("userId"), "")
 
     for b in data:
-        b["commissionPay"] = round((b.get("commissionBase") or 0) * COMMISSION_RATE, 2)
+        # ของเจ้าของแมพเองไม่นับค่าคอม -- commissionBase ที่เก็บใน index มาจากฝั่งเกม (ยังไม่ได้กันเจ้าของไว้ตรงนั้น) เลยต้องกันตรงนี้แทน totalSpent/purchaseCount ยังโชว์จริงตามปกติ แค่ค่าคอมเป็น 0
+        base = 0 if b.get("userId") == OWNER_ID else (b.get("commissionBase") or 0)
+        b["commissionPay"] = round(base * COMMISSION_RATE, 2)
         b["buyerPay"] = round(b["commissionPay"] / 2, 2)
         b["ownerPay"] = round(b["commissionPay"] - b["buyerPay"], 2)
 
@@ -435,7 +439,7 @@ def fetch_commission_data_ranged(from_ts, to_ts):
             "totalSpent": 0, "commissionBase": 0, "purchaseCount": 0, "lastTs": 0,
         })
         row["totalSpent"] += (e.get("p") or 0)
-        if entry_earns_commission(e):
+        if uid != OWNER_ID and entry_earns_commission(e):  # ของเจ้าของแมพเองไม่นับค่าคอม
             row["commissionBase"] += (e.get("p") or 0)
         row["purchaseCount"] += 1
         row["lastTs"] = max(row["lastTs"], e.get("ts") or 0)
@@ -970,6 +974,11 @@ td:last-child{border-right:1px solid #f0f2f7;border-radius:0 10px 10px 0}
 .uid-cell{color:#aaa;font-size:11px;margin-top:2px}
 .money{color:#f59e0b;font-weight:700}
 .comm{color:#22c55e;font-weight:700}
+.buyerpay{color:#ef4444;font-weight:700}
+.ownerpay{color:#7c3aed;font-weight:700}
+#sBuyerTotal,#dBuyerPay{color:#ef4444}
+#sOwnerTotal,#dOwnerPay{color:#7c3aed}
+#sCommTotal,#dCommTotal{color:#22c55e}
 .item-name{color:#1a1a2e;font-weight:600}
 .price{color:#f59e0b;font-weight:700}
 .badge{display:inline-block;padding:3px 9px;border-radius:6px;font-size:11px;font-weight:700}
@@ -1020,10 +1029,12 @@ input[type=date]:focus{border-color:#4f8ef7}
     <div class="stat"><div class="val" id="sPeople">0</div><div class="lbl">คนที่ซื้อ</div></div>
     <div class="stat"><div class="val" id="sBuyerTotal">0</div><div class="lbl">คนซื้อได้รวม 20% (Robux)</div></div>
     <div class="stat"><div class="val" id="sOwnerTotal">0</div><div class="lbl">เจ้าของแมพได้รวม 20% (Robux)</div></div>
+    <div class="stat"><div class="val" id="sCommTotal">0</div><div class="lbl">ค่าคอมรวม 40% (Robux)</div></div>
+    <div class="stat"><div class="val" id="sSpentTotal">0</div><div class="lbl">ยอดซื้อรวมทั้งหมด (ไม่หักค่าคอม)</div></div>
   </div>
   <div class="tbl-wrap">
     <table id="listTbl" style="display:none">
-      <thead><tr><th>#</th><th style="width:52px"></th><th>ผู้เล่น</th><th>ยอดซื้อรวม</th><th>ฐานค่าคอม</th><th>คนซื้อได้ 20%</th><th>เจ้าของแมพได้ 20%</th><th>จำนวนครั้ง</th><th>ซื้อล่าสุด</th></tr></thead>
+      <thead><tr><th>#</th><th style="width:52px"></th><th>ผู้เล่น</th><th>ยอดซื้อรวม</th><th>ฐานค่าคอม</th><th>คนซื้อได้ 20%</th><th>เจ้าของแมพได้ 20%</th><th>รวม 40%</th><th>จำนวนครั้ง</th><th>ซื้อล่าสุด</th></tr></thead>
       <tbody id="listBody"></tbody>
     </table>
   </div>
@@ -1049,6 +1060,7 @@ input[type=date]:focus{border-color:#4f8ef7}
     <div class="stat"><div class="val" id="dCommBase">0</div><div class="lbl">ฐานค่าคอม</div></div>
     <div class="stat"><div class="val" id="dBuyerPay">0</div><div class="lbl">คนซื้อได้ 20%</div></div>
     <div class="stat"><div class="val" id="dOwnerPay">0</div><div class="lbl">เจ้าของแมพได้ 20%</div></div>
+    <div class="stat"><div class="val" id="dCommTotal">0</div><div class="lbl">รวมค่าคอม 40%</div></div>
   </div>
   <div class="tbl-wrap">
     <table id="detailTbl">
@@ -1091,8 +1103,9 @@ function renderList(rows){
       <td><div class="name-cell">${name}</div><div class="uid-cell">User ID ${b.userId}${b.username&&b.username!==name?' · @'+b.username:''}</div></td>
       <td class="money">${fmtR(b.totalSpent)}</td>
       <td>${fmtR(b.commissionBase)}</td>
-      <td class="comm">${fmtR(buyerPay)}</td>
-      <td class="comm">${fmtR(ownerPay)}</td>
+      <td class="buyerpay">${fmtR(buyerPay)}</td>
+      <td class="ownerpay">${fmtR(ownerPay)}</td>
+      <td class="comm">${fmtR(pay)}</td>
       <td>${b.purchaseCount||0}</td>
       <td class="date-cell">${last}</td>
     </tr>`
@@ -1131,11 +1144,15 @@ async function loadList(){
     document.querySelector('#listStats .lbl').textContent=data.ranged?'คนที่ซื้อในช่วงนี้':'คนที่เคยซื้อ'
     document.querySelectorAll('#listStats .lbl')[1].textContent=(data.ranged?'คนซื้อได้รวม 20% ในช่วงนี้':'คนซื้อได้รวม 20% ทั้งหมด')+' (Robux)'
     document.querySelectorAll('#listStats .lbl')[2].textContent=(data.ranged?'เจ้าของแมพได้รวม 20% ในช่วงนี้':'เจ้าของแมพได้รวม 20% ทั้งหมด')+' (Robux)'
+    document.querySelectorAll('#listStats .lbl')[3].textContent=(data.ranged?'ค่าคอมรวม 40% ในช่วงนี้':'ค่าคอมรวม 40% ทั้งหมด')+' (Robux)'
+    document.querySelectorAll('#listStats .lbl')[4].textContent=(data.ranged?'ยอดซื้อรวมในช่วงนี้':'ยอดซื้อรวมทั้งหมด')+' (ไม่หักค่าคอม)'
     if(!rows.length){status.className='status';status.textContent=data.ranged?'ไม่มีใครซื้อในช่วงวันที่นี้':'ยังไม่มีข้อมูลการซื้อ';return}
     status.textContent=''
     document.getElementById('sPeople').textContent=rows.length.toLocaleString()
     document.getElementById('sBuyerTotal').textContent=fmtR(rows.reduce((s,b)=>{const pay=b.commissionPay!=null?b.commissionPay:(b.commissionBase||0)*COMMISSION_RATE;return s+(b.buyerPay!=null?b.buyerPay:splitComm(pay).buyer)},0))
     document.getElementById('sOwnerTotal').textContent=fmtR(rows.reduce((s,b)=>{const pay=b.commissionPay!=null?b.commissionPay:(b.commissionBase||0)*COMMISSION_RATE;return s+(b.ownerPay!=null?b.ownerPay:splitComm(pay).owner)},0))
+    document.getElementById('sCommTotal').textContent=fmtR(rows.reduce((s,b)=>s+(b.commissionPay!=null?b.commissionPay:(b.commissionBase||0)*COMMISSION_RATE),0))
+    document.getElementById('sSpentTotal').textContent=fmtR(rows.reduce((s,b)=>s+(b.totalSpent||0),0))
     document.getElementById('listStats').style.display='flex'
     renderList(rows)
     document.getElementById('listTbl').style.display='table'
@@ -1399,7 +1416,7 @@ class Handler(BaseHTTPRequestHandler):
             if entries is None:
                 self._json(500, {"message": "DataStore error"}); return
             for e in entries:
-                e["earns"] = entry_earns_commission(e)
+                e["earns"] = False if uid == OWNER_ID else entry_earns_commission(e)
             # เติมชื่อ/ผู้สร้าง/thumbnail ให้ครบ (cache รายชิ้นอยู่แล้วใน fetch_item_details)
             details = fetch_item_details(entries) if entries else {}
             for e in entries:

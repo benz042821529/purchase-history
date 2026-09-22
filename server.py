@@ -1321,6 +1321,7 @@ function renderDetail(){
   const {buyer:dBuyerPay,owner:dOwnerPay}=splitComm(commBase*COMMISSION_RATE)
   document.getElementById('dBuyerPay').textContent=fmtR(dBuyerPay)
   document.getElementById('dOwnerPay').textContent=fmtR(dOwnerPay)
+  document.getElementById('dCommTotal').textContent=fmtR(dBuyerPay+dOwnerPay)
   document.getElementById('detailBody').innerHTML=items.map(e=>{
     const isB=e.tp==='B',{date,time}=fmtParts(e.ts)
     return `<tr>

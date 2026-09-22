@@ -477,7 +477,7 @@ def fetch_commission_data():
             raise
     if not isinstance(data, list):
         data = []
-    data.sort(key=lambda x: x.get("commissionBase", 0), reverse=True)
+    data.sort(key=lambda x: x.get("lastTs", 0), reverse=True)
 
     avatars = fetch_avatars([b["userId"] for b in data if b.get("userId")])
     for b in data:
@@ -511,7 +511,7 @@ def fetch_commission_data_ranged(from_ts, to_ts):
         row["lastTs"] = max(row["lastTs"], e.get("ts") or 0)
 
     data = list(byUid.values())
-    data.sort(key=lambda x: x.get("commissionBase", 0), reverse=True)
+    data.sort(key=lambda x: x.get("lastTs", 0), reverse=True)
 
     avatars = fetch_avatars([b["userId"] for b in data])
     for b in data:
@@ -1043,7 +1043,7 @@ td:last-child{border-right:1px solid #f0f2f7;border-radius:0 10px 10px 0}
 .buyerpay{color:#ef4444;font-weight:700}
 .ownerpay{color:#7c3aed;font-weight:700}
 #sBuyerTotal,#dBuyerPay{color:#ef4444}
-#sOwnerTotal,#dOwnerPay{color:#7c3aed}
+#dOwnerPay{color:#7c3aed}
 #sCommTotal,#dCommTotal{color:#22c55e}
 .item-name{color:#1a1a2e;font-weight:600}
 .price{color:#f59e0b;font-weight:700}
@@ -1061,6 +1061,9 @@ td:last-child{border-right:1px solid #f0f2f7;border-radius:0 10px 10px 0}
 .fg label{font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
 input[type=date]{padding:8px 10px;background:#f7f8fc;border:1.5px solid #e4e6ef;border-radius:9px;color:#1a1a2e;font-size:13px;outline:none}
 input[type=date]:focus{border-color:#4f8ef7}
+input[type=text]{width:100%;padding:8px 12px;background:#f7f8fc;border:1.5px solid #e4e6ef;border-radius:9px;color:#1a1a2e;font-size:13px;outline:none}
+input[type=text]:focus{border-color:#4f8ef7;background:#fff}
+input[type=text]::placeholder{color:#bbb}
 .qrow{display:flex;gap:6px;align-items:flex-end}
 .qbtn{padding:8px 14px;background:#f7f8fc;border:1.5px solid #e4e6ef;border-radius:9px;color:#888;font-size:12px;cursor:pointer;font-weight:600}
 .qbtn:hover{border-color:#4f8ef7;color:#4f8ef7}
@@ -1092,11 +1095,13 @@ input[type=date]:focus{border-color:#4f8ef7}
         <button class="qbtn active" onclick="listQuickFilter(0)">ทั้งหมด</button>
       </div>
     </div>
+    <div class="date-row" style="margin-top:10px">
+      <div class="fg" style="flex:1;min-width:200px"><label>ค้นหาชื่อ / User ID</label><input type="text" id="nameSearch" placeholder="พิมพ์ชื่อหรือ User ID..." oninput="filterListByName()"></div>
+    </div>
   </div>
   <div class="stats" id="listStats" style="display:none">
     <div class="stat"><div class="val" id="sPeople">0</div><div class="lbl">คนที่ซื้อ</div></div>
     <div class="stat"><div class="val" id="sBuyerTotal">0</div><div class="lbl">คนซื้อได้รวม 20% (Robux)</div></div>
-    <div class="stat"><div class="val" id="sOwnerTotal">0</div><div class="lbl">เจ้าของแมพได้รวม 20% (Robux)</div></div>
     <div class="stat"><div class="val" id="sCommTotal">0</div><div class="lbl">ค่าคอมรวม 40% (Robux)</div></div>
     <div class="stat"><div class="val" id="sSpentTotal">0</div><div class="lbl">ยอดซื้อรวมทั้งหมด (ไม่หักค่าคอม)</div></div>
   </div>
@@ -1162,6 +1167,20 @@ const COMMISSION_RATE=0.40
 function fmtR(n){return 'R$ '+(n||0).toLocaleString(undefined,{maximumFractionDigits:2})}
 // แบ่งค่าคอม 40% (ที่คำนวณแล้ว) ออกเป็น 2 ส่วนเท่าๆ -- หารจากยอดที่ได้แล้ว ไม่คำนวณ 20% แยก 2 รอบ (กันคลาดเคลื่อนจากการปัดเศษซ้ำ)
 function splitComm(total){const buyer=Math.round((total/2)*100)/100;return{buyer,owner:Math.round((total-buyer)*100)/100}}
+let _listRows=[]
+
+function filterListByName(){
+  const q=(document.getElementById('nameSearch').value||'').trim().toLowerCase()
+  if(!q){renderList(_listRows);return}
+  const filtered=_listRows.filter(b=>{
+    const name=(b.displayName||b.username||'').toLowerCase()
+    const uname=(b.username||'').toLowerCase()
+    const uid=String(b.userId||'')
+    return name.includes(q)||uname.includes(q)||uid.includes(q)
+  })
+  renderList(filtered)
+}
+
 function renderList(rows){
   document.getElementById('listBody').innerHTML=rows.map((b,i)=>{
     const name=b.displayName||b.username||('ID '+b.userId)
@@ -1229,18 +1248,17 @@ async function loadList(){
     const rows=data.buyers||[]
     document.querySelector('#listStats .lbl').textContent=data.ranged?'คนที่ซื้อในช่วงนี้':'คนที่เคยซื้อ'
     document.querySelectorAll('#listStats .lbl')[1].textContent=(data.ranged?'คนซื้อได้รวม 20% ในช่วงนี้':'คนซื้อได้รวม 20% ทั้งหมด')+' (Robux)'
-    document.querySelectorAll('#listStats .lbl')[2].textContent=(data.ranged?'เจ้าของแมพได้รวม 20% ในช่วงนี้':'เจ้าของแมพได้รวม 20% ทั้งหมด')+' (Robux)'
-    document.querySelectorAll('#listStats .lbl')[3].textContent=(data.ranged?'ค่าคอมรวม 40% ในช่วงนี้':'ค่าคอมรวม 40% ทั้งหมด')+' (Robux)'
-    document.querySelectorAll('#listStats .lbl')[4].textContent=(data.ranged?'ยอดซื้อรวมในช่วงนี้':'ยอดซื้อรวมทั้งหมด')+' (ไม่หักค่าคอม)'
+    document.querySelectorAll('#listStats .lbl')[2].textContent=(data.ranged?'ค่าคอมรวม 40% ในช่วงนี้':'ค่าคอมรวม 40% ทั้งหมด')+' (Robux)'
+    document.querySelectorAll('#listStats .lbl')[3].textContent=(data.ranged?'ยอดซื้อรวมในช่วงนี้':'ยอดซื้อรวมทั้งหมด')+' (ไม่หักค่าคอม)'
     if(!rows.length){status.className='status';status.textContent=data.ranged?'ไม่มีใครซื้อในช่วงวันที่นี้':'ยังไม่มีข้อมูลการซื้อ';return}
     status.textContent=''
     document.getElementById('sPeople').textContent=rows.length.toLocaleString()
     document.getElementById('sBuyerTotal').textContent=fmtR(rows.reduce((s,b)=>{const pay=b.commissionPay!=null?b.commissionPay:(b.commissionBase||0)*COMMISSION_RATE;return s+(b.buyerPay!=null?b.buyerPay:splitComm(pay).buyer)},0))
-    document.getElementById('sOwnerTotal').textContent=fmtR(rows.reduce((s,b)=>{const pay=b.commissionPay!=null?b.commissionPay:(b.commissionBase||0)*COMMISSION_RATE;return s+(b.ownerPay!=null?b.ownerPay:splitComm(pay).owner)},0))
     document.getElementById('sCommTotal').textContent=fmtR(rows.reduce((s,b)=>s+(b.commissionPay!=null?b.commissionPay:(b.commissionBase||0)*COMMISSION_RATE),0))
     document.getElementById('sSpentTotal').textContent=fmtR(rows.reduce((s,b)=>s+(b.totalSpent||0),0))
     document.getElementById('listStats').style.display='flex'
-    renderList(rows)
+    _listRows=rows
+    filterListByName()
     document.getElementById('listTbl').style.display='table'
   }catch(e){status.className='status err';status.textContent='เกิดข้อผิดพลาด: '+e.message}
 }

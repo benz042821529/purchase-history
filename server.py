@@ -1020,13 +1020,13 @@ h1{color:#1a1a2e;font-size:22px;font-weight:700;margin-bottom:4px}
 .btn:hover{background:#3a7de8}.btn:disabled{background:#ccc;cursor:default}
 .back{display:none;padding:8px 16px;background:#fff;border:1.5px solid #e4e6ef;border-radius:9px;color:#4f8ef7;font-size:13px;font-weight:700;cursor:pointer;margin-bottom:14px}
 .back:hover{border-color:#4f8ef7}
-.status{max-width:960px;margin:0 auto 10px;font-size:13px;color:#aaa;min-height:16px}
+.status{max-width:1400px;margin:0 auto 10px;font-size:13px;color:#aaa;min-height:16px}
 .status.err{color:#ef4444}.status.ok{color:#22c55e}
-.stats{max-width:960px;margin:0 auto 14px;display:flex;gap:10px;flex-wrap:wrap}
+.stats{max-width:1400px;margin:0 auto 14px;display:flex;gap:10px;flex-wrap:wrap}
 .stat{flex:1;min-width:120px;background:#fff;border:1px solid #e4e6ef;border-radius:12px;padding:14px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.04)}
 .stat .val{font-size:22px;font-weight:700;color:#4f8ef7}
 .stat .lbl{font-size:11px;color:#aaa;margin-top:3px;font-weight:600;text-transform:uppercase;letter-spacing:.5px}
-.tbl-wrap{max-width:960px;margin:0 auto;overflow-x:auto}
+.tbl-wrap{max-width:1400px;margin:0 auto;overflow-x:auto}
 table{width:100%;border-collapse:separate;border-spacing:0 5px;font-size:13px}
 thead th{padding:6px 14px;color:#bbb;font-size:11px;text-transform:uppercase;letter-spacing:.5px;text-align:left;font-weight:600}
 tbody tr{background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.05)}
@@ -1056,8 +1056,8 @@ td:last-child{border-right:1px solid #f0f2f7;border-radius:0 10px 10px 0}
 .time-cell{color:#aaa;font-size:12px;margin-top:2px}
 .creator{color:#888;font-size:12px}
 .thumb{width:48px;height:48px;border-radius:8px;object-fit:cover;background:#f0f2f7;display:block}
-.wide{max-width:960px}
-.card{background:#fff;border:1px solid #e4e6ef;border-radius:14px;padding:16px 20px;max-width:960px;margin:0 auto 14px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.wide{max-width:1400px}
+.card{background:#fff;border:1px solid #e4e6ef;border-radius:14px;padding:16px 20px;max-width:1400px;margin:0 auto 14px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
 .date-row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
 .fg{display:flex;flex-direction:column;gap:4px}
 .fg label{font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
@@ -1076,7 +1076,7 @@ input[type=text]::placeholder{color:#bbb}
 </head>
 <body>
 
-<div style="max-width:960px;margin:0 auto 18px">
+<div style="max-width:1400px;margin:0 auto 18px">
   <h1>ค่าคอมมิชชั่น</h1>
   <div class="sub">ค่าคอม = 40% ของยอดที่เข้าเกณฑ์ (ไม่นับไอเทม &lt;5 Robux และ Limited) — ยอดสะสมทั้งหมด ยังไม่หักส่วนที่จ่ายไปแล้ว กดชื่อเพื่อดูรายการซื้อ</div>
 </div>

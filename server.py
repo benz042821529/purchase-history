@@ -1065,7 +1065,7 @@ input[type=date]:focus{border-color:#4f8ef7}
 .qbtn{padding:8px 14px;background:#f7f8fc;border:1.5px solid #e4e6ef;border-radius:9px;color:#888;font-size:12px;cursor:pointer;font-weight:600}
 .qbtn:hover{border-color:#4f8ef7;color:#4f8ef7}
 .qbtn.active{background:#4f8ef7;color:#fff;border-color:#4f8ef7}
-.cutoffInput{width:130px;padding:6px 8px;font-size:12px}
+.cutoffInput{width:155px;min-width:155px;padding:6px 4px;font-size:12px}
 .cutoffLabel{font-size:13px;color:#1a1a2e;font-weight:700;padding:8px 0}
 </style>
 </head>

@@ -8,3 +8,6 @@ server.py.bak.*
 
 # Env
 .env
+
+# Runtime data (local only, resets on redeploy)
+cutoffs.json

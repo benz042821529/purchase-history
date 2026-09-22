@@ -26,6 +26,72 @@ DS_NAME = "PurchaseLog_v1"
 COMMISSION_DS_NAME = "PurchaseBuyersIndex_v1"
 COMMISSION_KEY     = "AllBuyers"
 
+# วันที่ตัดยอดล่าสุดต่อคน -- เก็บแค่ในไฟล์ของเว็บเอง ไม่เกี่ยวกับ Roblox DataStore เลย
+# หมายเหตุ: ดิสก์ของ Render free tier ไม่ถาวรข้ามการ deploy ใหม่ -- ถ้าไฟล์หาย จะ reseed กลับเป็นค่าเริ่มต้นด้านล่างนี้
+CUTOFF_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cutoffs.json")
+DEFAULT_CUTOFFS = {
+    "9240613140":  "2026-08-16",
+    "7618177365":  "2026-09-18",
+    "9220235901":  "2026-09-12",
+    "9750743916":  "2026-09-21",
+    "8988744930":  "2026-08-16",
+    "9675242101":  "2026-07-24",
+    "10154004825": "2026-09-21",
+    "10268037883": "2026-09-16",
+    "9435680691":  "2026-09-18",
+    "927899604":   "2026-09-14",
+    "8792410182":  "2026-09-14",
+    "8619451331":  "2026-09-14",
+    "3982309897":  "2026-09-14",
+    "9061633806":  "2026-09-14",
+    "8793030389":  "2026-09-22",
+    "9876746009":  "2026-09-14",
+    "9404303714":  "2026-09-20",
+    "9110827190":  "2026-09-20",
+    "8984915796":  "2026-09-21",
+    "10914473375": "2026-09-20",
+    "3865531926":  "2026-09-21",
+    "9148725166":  "2026-09-21",
+}
+_cutoff_lock = threading.Lock()
+
+def load_cutoffs():
+    with _cutoff_lock:
+        if not os.path.exists(CUTOFF_FILE):
+            try:
+                with open(CUTOFF_FILE, "w", encoding="utf-8") as f:
+                    json.dump(DEFAULT_CUTOFFS, f, ensure_ascii=False, indent=2)
+            except Exception as e:
+                print(f"[load_cutoffs seed] {e}")
+            return dict(DEFAULT_CUTOFFS)
+        try:
+            with open(CUTOFF_FILE, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            return data if isinstance(data, dict) else {}
+        except Exception as e:
+            print(f"[load_cutoffs] {e}")
+            return {}
+
+def save_cutoff(uid, date_str):
+    with _cutoff_lock:
+        cutoffs = dict(DEFAULT_CUTOFFS)
+        if os.path.exists(CUTOFF_FILE):
+            try:
+                with open(CUTOFF_FILE, "r", encoding="utf-8") as f:
+                    cutoffs = json.load(f)
+                if not isinstance(cutoffs, dict):
+                    cutoffs = {}
+            except Exception as e:
+                print(f"[save_cutoff load] {e}")
+                cutoffs = {}
+        if date_str:
+            cutoffs[str(uid)] = date_str
+        else:
+            cutoffs.pop(str(uid), None)
+        with open(CUTOFF_FILE, "w", encoding="utf-8") as f:
+            json.dump(cutoffs, f, ensure_ascii=False, indent=2)
+        return cutoffs
+
 # --- simple in-memory TTL cache ---
 _cache = {}
 _cache_lock = threading.Lock()
@@ -999,6 +1065,8 @@ input[type=date]:focus{border-color:#4f8ef7}
 .qbtn{padding:8px 14px;background:#f7f8fc;border:1.5px solid #e4e6ef;border-radius:9px;color:#888;font-size:12px;cursor:pointer;font-weight:600}
 .qbtn:hover{border-color:#4f8ef7;color:#4f8ef7}
 .qbtn.active{background:#4f8ef7;color:#fff;border-color:#4f8ef7}
+.cutoffInput{width:130px;padding:6px 8px;font-size:12px}
+.cutoffLabel{font-size:13px;color:#1a1a2e;font-weight:700;padding:8px 0}
 </style>
 </head>
 <body>
@@ -1034,7 +1102,7 @@ input[type=date]:focus{border-color:#4f8ef7}
   </div>
   <div class="tbl-wrap">
     <table id="listTbl" style="display:none">
-      <thead><tr><th>#</th><th style="width:52px"></th><th>ผู้เล่น</th><th>ยอดซื้อรวม</th><th>ฐานค่าคอม</th><th>คนซื้อได้ 20%</th><th>เจ้าของแมพได้ 20%</th><th>รวม 40%</th><th>จำนวนครั้ง</th><th>ซื้อล่าสุด</th></tr></thead>
+      <thead><tr><th>#</th><th style="width:52px"></th><th>ผู้เล่น</th><th>ยอดซื้อรวม</th><th>ฐานค่าคอม</th><th>คนซื้อได้ 20%</th><th>เจ้าของแมพได้ 20%</th><th>รวม 40%</th><th>จำนวนครั้ง</th><th>ซื้อล่าสุด</th><th>ตัดยอดล่าสุด</th></tr></thead>
       <tbody id="listBody"></tbody>
     </table>
   </div>
@@ -1050,6 +1118,10 @@ input[type=date]:focus{border-color:#4f8ef7}
         <button class="qbtn" onclick="quickFilter(30)">30 วัน</button>
         <button class="qbtn active" onclick="quickFilter(0)">ทั้งหมด</button>
       </div>
+    </div>
+    <div class="date-row" style="margin-top:10px">
+      <div class="fg"><label>ตัดยอดล่าสุด</label><div class="cutoffLabel" id="cutoffLabel">-</div></div>
+      <button class="qbtn" onclick="saveDetailCutoff()">💾 บันทึกเป็นวันตัดยอดล่าสุด</button>
     </div>
   </div>
   <div class="stats" id="detailStats">
@@ -1108,8 +1180,22 @@ function renderList(rows){
       <td class="comm">${fmtR(pay)}</td>
       <td>${b.purchaseCount||0}</td>
       <td class="date-cell">${last}</td>
+      <td onclick="event.stopPropagation()"><input type="date" class="cutoffInput" value="${b.cutoffDate||''}" onchange="saveCutoff(${b.userId},this.value,this)"></td>
     </tr>`
   }).join('')
+}
+
+async function saveCutoff(uid,date,el){
+  el.disabled=true
+  try{
+    const res=await fetch('/api/cutoff?token='+encodeURIComponent(TOKEN),{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({uid,date})
+    })
+    if(!res.ok){alert('บันทึกวันตัดยอดไม่สำเร็จ')}
+  }catch(e){alert('เกิดข้อผิดพลาด: '+e.message)}
+  el.disabled=false
 }
 
 function listQuickFilter(days){
@@ -1179,7 +1265,25 @@ function quickFilter(days){
   renderDetail()
 }
 
-let _detailItems=[],_detailName='',_detailUid=0
+let _detailItems=[],_detailName='',_detailUid=0,_detailCutoff=null
+
+function updateCutoffLabel(){
+  document.getElementById('cutoffLabel').textContent=_detailCutoff?_detailCutoff:'ยังไม่เคยตัดยอด'
+}
+
+async function saveDetailCutoff(){
+  const to=document.getElementById('toDate').value
+  if(!to){alert('เลือก "ถึงวันที่" ก่อน แล้วค่อยบันทึกเป็นวันตัดยอด');return}
+  try{
+    const res=await fetch('/api/cutoff?token='+encodeURIComponent(TOKEN),{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({uid:_detailUid,date:to})
+    })
+    if(res.ok){_detailCutoff=to;updateCutoffLabel();alert('บันทึกวันตัดยอดแล้ว: '+to)}
+    else alert('บันทึกไม่สำเร็จ')
+  }catch(e){alert('เกิดข้อผิดพลาด: '+e.message)}
+}
 
 function renderDetail(){
   const from=dateToTs(document.getElementById('fromDate').value,false)
@@ -1228,7 +1332,14 @@ async function openDetail(uid,name){
     if(res.status===401||res.status===403){status.className='status err';status.textContent='ลิงก์ไม่ถูกต้อง';return}
     const data=await res.json()
     if(!res.ok){status.className='status err';status.textContent='Error: '+(data.message||res.status);return}
-    _detailItems=data.entries||[];_detailName=name;_detailUid=uid
+    _detailItems=data.entries||[];_detailName=name;_detailUid=uid;_detailCutoff=data.cutoffDate||null
+    updateCutoffLabel()
+    if(_detailCutoff){
+      const d=new Date(_detailCutoff+'T00:00:00')
+      d.setDate(d.getDate()+1)
+      document.getElementById('fromDate').value=toISO(Math.floor(d.getTime()/1000))
+      document.querySelectorAll('#detailView .qrow .qbtn').forEach(b=>b.classList.remove('active'))
+    }
     renderDetail()
   }catch(e){status.className='status err';status.textContent='เกิดข้อผิดพลาด: '+e.message}
 }
@@ -1264,6 +1375,24 @@ class Handler(BaseHTTPRequestHandler):
                 items  = json.loads(body.decode())
                 self._json(200, fetch_item_details(items))
             except Exception as e:
+                self._json(500, {"message": str(e)})
+        elif parsed.path == "/api/cutoff":
+            p     = urllib.parse.parse_qs(parsed.query)
+            token = (p.get("token") or [""])[0]
+            if not (self._check_auth() or self._check_view() or token_ok(token)):
+                self._json(401, {"message": "Unauthorized"}); return
+            try:
+                length   = int(self.headers.get("Content-Length", 0))
+                body     = json.loads(self.rfile.read(length).decode())
+                uid      = int(body.get("uid"))
+                date_str = (body.get("date") or "").strip() or None
+            except Exception as e:
+                self._json(400, {"message": f"invalid body: {e}"}); return
+            try:
+                save_cutoff(uid, date_str)
+                self._json(200, {"ok": True})
+            except Exception as e:
+                print(f"[save_cutoff {uid}] {e}")
                 self._json(500, {"message": str(e)})
         else:
             self._json(404, {"message": "Not found"})
@@ -1336,6 +1465,9 @@ class Handler(BaseHTTPRequestHandler):
                     buyers = fetch_commission_data_ranged(from_ts, to_ts)
                 else:
                     buyers = fetch_commission_data()
+                cutoffs = load_cutoffs()
+                for b in buyers:
+                    b["cutoffDate"] = cutoffs.get(str(b.get("userId")))
                 self._json(200, {"buyers": buyers, "ranged": bool(from_ts or to_ts)})
             except Exception as e:
                 print(f"[commission error] {e}")
@@ -1425,7 +1557,8 @@ class Handler(BaseHTTPRequestHandler):
                     e["nm"]    = d.get("name") or e.get("nm") or ""
                     e["cr"]    = d.get("creator", "")
                     e["thumb"] = d.get("thumb", "")
-            self._json(200, {"entries": entries})
+            cutoff = load_cutoffs().get(str(uid))
+            self._json(200, {"entries": entries, "cutoffDate": cutoff})
         except Exception as e:
             print(f"[commission-detail error] {e}")
             self._json(500, {"message": str(e)})

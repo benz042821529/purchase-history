@@ -555,7 +555,7 @@ def fetch_commission_data_ranged(from_ts, to_ts):
 
 
 def add_outstanding_commission(buyers, cutoffs):
-    """ค่าคอม 40% ที่ยังค้าง = ยอดที่ซื้อหลังวันตัดยอด (หลังเที่ยงคืนของวันนั้น เวลาไทย) จนถึงตอนนี้
+    """ค่าคอมส่วนลูกค้า 20% ที่ยังค้างจ่าย = ครึ่งหนึ่งของค่าคอม 40% จากยอดที่ซื้อหลังวันตัดยอด (หลังเที่ยงคืนของวันนั้น เวลาไทย) จนถึงตอนนี้
     คนที่ตัดยอดถึงวันซื้อล่าสุดแล้วได้ 0 ไม่ต้องดึง log; ไม่มีวันตัดยอดเลย = ค้างทั้งหมด"""
     tz = datetime.timezone(datetime.timedelta(hours=7))
     todo = {}
@@ -589,7 +589,8 @@ def add_outstanding_commission(buyers, cutoffs):
             b["outstandingPay"] = None  # ดึง log ไม่สำเร็จ
             continue
         base = sum((e.get("p") or 0) for e in entries if entry_earns_commission(e))
-        b["outstandingPay"] = round(base * COMMISSION_RATE, 2)
+        # หารครึ่งจาก 40% ที่ปัดแล้ว แบบเดียวกับ buyerPay กันผลรวมคลาดจากการปัดเศษซ้ำ
+        b["outstandingPay"] = round(round(base * COMMISSION_RATE, 2) / 2, 2)
 
 
 HTML = """<!DOCTYPE html>
@@ -1185,7 +1186,7 @@ input[type=text]::placeholder{color:#bbb}
   </div>
   <div class="tbl-wrap">
     <table id="listTbl" style="display:none">
-      <thead><tr><th>#</th><th style="width:52px"></th><th>ผู้เล่น</th><th>ยอดซื้อรวม</th><th>ฐานค่าคอม</th><th>คนซื้อได้ 20%</th><th>ค่าคอมค้าง 40%<br><span style="text-transform:none">(หลังวันตัดยอด → วันนี้)</span></th><th>รวม 40%</th><th>จำนวนครั้ง</th><th>ซื้อล่าสุด</th><th>ตัดยอดล่าสุด</th></tr></thead>
+      <thead><tr><th>#</th><th style="width:52px"></th><th>ผู้เล่น</th><th>ยอดซื้อรวม</th><th>ฐานค่าคอม</th><th>คนซื้อได้ 20%</th><th>ค้างจ่ายลูกค้า 20%<br><span style="text-transform:none">(หลังวันตัดยอด → วันนี้)</span></th><th>รวม 40%</th><th>จำนวนครั้ง</th><th>ซื้อล่าสุด</th><th>ตัดยอดล่าสุด</th></tr></thead>
       <tbody id="listBody"></tbody>
     </table>
   </div>

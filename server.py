@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import os, json, time, threading, hmac
+import os, json, time, threading, hmac, datetime
 from http.server import ThreadingHTTPServer, BaseHTTPRequestHandler
 import urllib.request, urllib.parse, urllib.error
 from concurrent.futures import ThreadPoolExecutor
@@ -552,6 +552,44 @@ def fetch_commission_data_ranged(from_ts, to_ts):
         b["ownerPay"] = round(b["commissionPay"] - b["buyerPay"], 2)
 
     return data
+
+
+def add_outstanding_commission(buyers, cutoffs):
+    """ค่าคอม 40% ที่ยังค้าง = ยอดที่ซื้อหลังวันตัดยอด (หลังเที่ยงคืนของวันนั้น เวลาไทย) จนถึงตอนนี้
+    คนที่ตัดยอดถึงวันซื้อล่าสุดแล้วได้ 0 ไม่ต้องดึง log; ไม่มีวันตัดยอดเลย = ค้างทั้งหมด"""
+    tz = datetime.timezone(datetime.timedelta(hours=7))
+    todo = {}
+    for b in buyers:
+        uid = b.get("userId")
+        b["outstandingPay"] = 0
+        if uid == OWNER_ID:
+            continue
+        cut = cutoffs.get(str(uid))
+        from_ts = 0
+        if cut:
+            try:
+                d = datetime.datetime.strptime(cut, "%Y-%m-%d").replace(tzinfo=tz) + datetime.timedelta(days=1)
+                from_ts = int(d.timestamp())
+            except ValueError:
+                pass
+        if (b.get("lastTsAll") or 0) < from_ts:
+            continue
+        todo[uid] = from_ts
+    def work(item):
+        uid, from_ts = item
+        return uid, fetch_history(uid, from_ts=from_ts or None)
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        results = dict(ex.map(work, todo.items()))
+    for b in buyers:
+        uid = b.get("userId")
+        if uid not in results:
+            continue
+        entries = results[uid]
+        if entries is None:
+            b["outstandingPay"] = None  # ดึง log ไม่สำเร็จ
+            continue
+        base = sum((e.get("p") or 0) for e in entries if entry_earns_commission(e))
+        b["outstandingPay"] = round(base * COMMISSION_RATE, 2)
 
 
 HTML = """<!DOCTYPE html>
@@ -1147,7 +1185,7 @@ input[type=text]::placeholder{color:#bbb}
   </div>
   <div class="tbl-wrap">
     <table id="listTbl" style="display:none">
-      <thead><tr><th>#</th><th style="width:52px"></th><th>ผู้เล่น</th><th>ยอดซื้อรวม</th><th>ฐานค่าคอม</th><th>คนซื้อได้ 20%</th><th>เจ้าของแมพได้ 20%</th><th>รวม 40%</th><th>จำนวนครั้ง</th><th>ซื้อล่าสุด</th><th>ตัดยอดล่าสุด</th></tr></thead>
+      <thead><tr><th>#</th><th style="width:52px"></th><th>ผู้เล่น</th><th>ยอดซื้อรวม</th><th>ฐานค่าคอม</th><th>คนซื้อได้ 20%</th><th>ค่าคอมค้าง 40%<br><span style="text-transform:none">(หลังวันตัดยอด → วันนี้)</span></th><th>รวม 40%</th><th>จำนวนครั้ง</th><th>ซื้อล่าสุด</th><th>ตัดยอดล่าสุด</th></tr></thead>
       <tbody id="listBody"></tbody>
     </table>
   </div>
@@ -1237,7 +1275,6 @@ function rowHtml(b,i){
     const last=b.lastTs?fmtParts(b.lastTs).date:'-'
     const pay=b.commissionPay!=null?b.commissionPay:(b.commissionBase||0)*COMMISSION_RATE
     const buyerPay=b.buyerPay!=null?b.buyerPay:splitComm(pay).buyer
-    const ownerPay=b.ownerPay!=null?b.ownerPay:splitComm(pay).owner
     return `<tr class="clickable${isSettled(b)?' settled':''}" onclick="openDetail(${b.userId},'${(name+'').replace(/'/g,"\\\\'")}')">
       <td class="rank">${i+1}</td>
       <td><img class="thumb" src="${b.avatar||BLANK_PX}"></td>
@@ -1245,7 +1282,7 @@ function rowHtml(b,i){
       <td class="money">${fmtR(b.totalSpent)}</td>
       <td>${fmtR(b.commissionBase)}</td>
       <td class="buyerpay">${fmtR(buyerPay)}</td>
-      <td class="ownerpay">${fmtR(ownerPay)}</td>
+      <td class="ownerpay">${b.outstandingPay==null?'-':fmtR(b.outstandingPay)}</td>
       <td class="comm">${fmtR(pay)}</td>
       <td>${b.purchaseCount||0}</td>
       <td class="date-cell">${last}</td>
@@ -1550,6 +1587,7 @@ class Handler(BaseHTTPRequestHandler):
                 for b in buyers:
                     b["cutoffDate"] = cutoffs.get(str(b.get("userId")))
                     b["lastTsAll"]  = max(last_all.get(str(b.get("userId")), 0), b.get("lastTs") or 0)
+                add_outstanding_commission(buyers, cutoffs)
                 self._json(200, {"buyers": buyers, "ranged": bool(from_ts or to_ts)})
             except Exception as e:
                 print(f"[commission error] {e}")

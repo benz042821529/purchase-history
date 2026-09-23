@@ -1102,6 +1102,8 @@ input[type=text]::placeholder{color:#bbb}
 .qbtn:hover{border-color:#4f8ef7;color:#4f8ef7}
 .qbtn.active{background:#4f8ef7;color:#fff;border-color:#4f8ef7}
 .cutoffInput{width:160px;min-width:160px;padding:6px 4px;font-size:12px}
+.cutoffWrap{display:flex;align-items:center;gap:6px}
+.settledMark{width:18px;font-size:16px;color:#22a55b;font-weight:800;text-align:center}
 .cutoffLabel{font-size:13px;color:#1a1a2e;font-weight:700;padding:8px 0}
 </style>
 </head>
@@ -1232,9 +1234,16 @@ function renderList(rows){
       <td class="comm">${fmtR(pay)}</td>
       <td>${b.purchaseCount||0}</td>
       <td class="date-cell">${last}</td>
-      <td onclick="event.stopPropagation()"><input type="date" class="cutoffInput" value="${b.cutoffDate||''}" onchange="saveCutoff(${b.userId},this.value,this)"></td>
+      <td onclick="event.stopPropagation()"><div class="cutoffWrap"><input type="date" class="cutoffInput" value="${b.cutoffDate||''}" onchange="saveCutoff(${b.userId},this.value,this)"><span class="settledMark" title="ตัดยอดถึงวันที่ซื้อล่าสุดแล้ว">${isSettled(b)?'✓':''}</span></div></td>
     </tr>`
   }).join('')
+}
+
+// ตัดยอดถึงปัจจุบันแล้ว = วันตัดยอด >= วันที่ซื้อล่าสุด (เทียบแบบ YYYY-MM-DD ตามเวลาเครื่อง)
+function isoDate(ts){const d=new Date(ts*1000);return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`}
+function isSettled(b){
+  const last=b.lastTsAll||b.lastTs
+  return !!(b.cutoffDate&&last&&b.cutoffDate>=isoDate(last))
 }
 
 async function saveCutoff(uid,date,el){
@@ -1246,6 +1255,10 @@ async function saveCutoff(uid,date,el){
       body:JSON.stringify({uid,date})
     })
     if(!res.ok){alert('บันทึกวันตัดยอดไม่สำเร็จ')}
+    else{
+      const b=_listRows.find(x=>x.userId===uid)
+      if(b){b.cutoffDate=date||null;el.parentElement.querySelector('.settledMark').textContent=isSettled(b)?'✓':''}
+    }
   }catch(e){alert('เกิดข้อผิดพลาด: '+e.message)}
   el.disabled=false
 }
@@ -1518,8 +1531,11 @@ class Handler(BaseHTTPRequestHandler):
                 else:
                     buyers = fetch_commission_data()
                 cutoffs = load_cutoffs()
+                # วันซื้อล่าสุดตลอดกาล (ไม่ขึ้นกับช่วงที่กรอง) -- ใช้ตัดสินว่าตัดยอดถึงปัจจุบันแล้วหรือยัง
+                last_all = {str(x.get("userId")): x.get("lastTs") or 0 for x in fetch_commission_data()}
                 for b in buyers:
                     b["cutoffDate"] = cutoffs.get(str(b.get("userId")))
+                    b["lastTsAll"]  = max(last_all.get(str(b.get("userId")), 0), b.get("lastTs") or 0)
                 self._json(200, {"buyers": buyers, "ranged": bool(from_ts or to_ts)})
             except Exception as e:
                 print(f"[commission error] {e}")

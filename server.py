@@ -651,7 +651,7 @@ function pad(n){return String(n).padStart(2,'0')}
 function fmtParts(ts){
   const d=new Date(ts*1000)
   return {
-    date:`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`,
+    date:`${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`,
     time:`${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
   }
 }
@@ -881,7 +881,7 @@ function pad(n){return String(n).padStart(2,'0')}
 function fmtParts(ts){
   const d=new Date(ts*1000)
   return{
-    date:`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`,
+    date:`${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`,
     time:`${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
   }
 }
@@ -1154,7 +1154,7 @@ const TOKEN='__VIEW_TOKEN__'
 function pad(n){return String(n).padStart(2,'0')}
 function fmtParts(ts){
   const d=new Date(ts*1000)
-  return{date:`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`,time:`${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`}
+  return{date:`${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`,time:`${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`}
 }
 
 function showList(){

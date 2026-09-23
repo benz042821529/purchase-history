@@ -26,9 +26,13 @@ DS_NAME = "PurchaseLog_v1"
 COMMISSION_DS_NAME = "PurchaseBuyersIndex_v1"
 COMMISSION_KEY     = "AllBuyers"
 
-# วันที่ตัดยอดล่าสุดต่อคน -- เก็บแค่ในไฟล์ของเว็บเอง ไม่เกี่ยวกับ Roblox DataStore เลย
-# หมายเหตุ: ดิสก์ของ Render free tier ไม่ถาวรข้ามการ deploy ใหม่ -- ถ้าไฟล์หาย จะ reseed กลับเป็นค่าเริ่มต้นด้านล่างนี้
-CUTOFF_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "cutoffs.json")
+# วันที่ตัดยอดล่าสุดต่อคน (userId -> "YYYY-MM-DD") -- เก็บถาวรใน GitHub Gist แยกจาก Roblox ทั้งหมด
+# ข้อมูล Roblox แค่ดึงมาแสดง ไม่เขียนกลับ; เดิมเก็บใน cutoffs.json แต่ดิสก์ Render free tier โดนล้างทุกครั้งที่ deploy/หลับ
+# ตั้ง env var บน Render: GIST_TOKEN (GitHub token สิทธิ์ gist) และ GIST_ID (id ของ gist ที่มีไฟล์ cutoffs.json)
+GIST_TOKEN = os.environ.get("GIST_TOKEN", "")
+GIST_ID    = os.environ.get("GIST_ID", "")
+GIST_FILE  = "cutoffs.json"
+# ใช้ seed ครั้งแรกเท่านั้น (ตอนที่ไฟล์ใน gist ยังว่าง)
 DEFAULT_CUTOFFS = {
     "9240613140":  "2026-08-16",
     "7618177365":  "2026-09-18",
@@ -53,44 +57,64 @@ DEFAULT_CUTOFFS = {
     "3865531926":  "2026-09-21",
     "9148725166":  "2026-09-21",
 }
-_cutoff_lock = threading.Lock()
+_cutoff_lock  = threading.Lock()
+_cutoff_cache = None  # dict ที่โหลดจาก gist สำเร็จแล้ว
+
+def _gist_request(method, body=None):
+    if not (GIST_TOKEN and GIST_ID):
+        raise RuntimeError("GIST_TOKEN / GIST_ID ยังไม่ได้ตั้ง")
+    req = urllib.request.Request(
+        f"https://api.github.com/gists/{GIST_ID}",
+        data=json.dumps(body).encode() if body is not None else None,
+        method=method,
+        headers={
+            "Authorization": f"Bearer {GIST_TOKEN}",
+            "Accept":        "application/vnd.github+json",
+            "Content-Type":  "application/json",
+            "User-Agent":    "purchase-history-dashboard",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=10) as r:
+        return json.loads(r.read().decode())
+
+def _write_cutoffs(cutoffs):
+    content = json.dumps(cutoffs, ensure_ascii=False, indent=2, sort_keys=True)
+    _gist_request("PATCH", {"files": {GIST_FILE: {"content": content}}})
+
+def _read_cutoffs():
+    """คืน dict จาก gist; ถ้าไฟล์ยังไม่มี/ว่าง ให้ seed ด้วย DEFAULT_CUTOFFS; error อื่นให้ throw"""
+    f = (_gist_request("GET").get("files") or {}).get(GIST_FILE)
+    content = (f or {}).get("content", "").strip()
+    if content and content != "{}":
+        data = json.loads(content)
+        return data if isinstance(data, dict) else {}
+    seed = dict(DEFAULT_CUTOFFS)
+    _write_cutoffs(seed)
+    return seed
 
 def load_cutoffs():
+    global _cutoff_cache
     with _cutoff_lock:
-        if not os.path.exists(CUTOFF_FILE):
+        if _cutoff_cache is None:
             try:
-                with open(CUTOFF_FILE, "w", encoding="utf-8") as f:
-                    json.dump(DEFAULT_CUTOFFS, f, ensure_ascii=False, indent=2)
+                _cutoff_cache = _read_cutoffs()
             except Exception as e:
-                print(f"[load_cutoffs seed] {e}")
-            return dict(DEFAULT_CUTOFFS)
-        try:
-            with open(CUTOFF_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-            return data if isinstance(data, dict) else {}
-        except Exception as e:
-            print(f"[load_cutoffs] {e}")
-            return {}
+                print(f"[load_cutoffs] {e}")
+                return {}
+        return dict(_cutoff_cache)
 
 def save_cutoff(uid, date_str):
+    global _cutoff_cache
     with _cutoff_lock:
-        cutoffs = dict(DEFAULT_CUTOFFS)
-        if os.path.exists(CUTOFF_FILE):
-            try:
-                with open(CUTOFF_FILE, "r", encoding="utf-8") as f:
-                    cutoffs = json.load(f)
-                if not isinstance(cutoffs, dict):
-                    cutoffs = {}
-            except Exception as e:
-                print(f"[save_cutoff load] {e}")
-                cutoffs = {}
+        # อ่านค่าล่าสุดจาก gist ก่อนเขียนเสมอ -- ถ้าอ่านไม่ได้ให้ล้มเหลว ห้ามเขียนทับด้วยข้อมูลเก่า
+        cutoffs = _read_cutoffs()
         if date_str:
             cutoffs[str(uid)] = date_str
         else:
             cutoffs.pop(str(uid), None)
-        with open(CUTOFF_FILE, "w", encoding="utf-8") as f:
-            json.dump(cutoffs, f, ensure_ascii=False, indent=2)
-        return cutoffs
+        _write_cutoffs(cutoffs)
+        _cutoff_cache = cutoffs
+        return dict(cutoffs)
 
 # --- simple in-memory TTL cache ---
 _cache = {}

@@ -29,8 +29,9 @@ COMMISSION_KEY     = "AllBuyers"
 # วันที่ตัดยอดล่าสุดต่อคน (userId -> "YYYY-MM-DD") -- เก็บถาวรใน GitHub Gist แยกจาก Roblox ทั้งหมด
 # ข้อมูล Roblox แค่ดึงมาแสดง ไม่เขียนกลับ; เดิมเก็บใน cutoffs.json แต่ดิสก์ Render free tier โดนล้างทุกครั้งที่ deploy/หลับ
 # ตั้ง env var บน Render: GIST_TOKEN (GitHub token สิทธิ์ gist) และ GIST_ID (id ของ gist ที่มีไฟล์ cutoffs.json)
-GIST_TOKEN = os.environ.get("GIST_TOKEN", "")
-GIST_ID    = os.environ.get("GIST_ID", "")
+GIST_TOKEN = os.environ.get("GIST_TOKEN", "").strip()
+# รับได้ทั้ง id เปล่าๆ หรือวางลิงก์เต็ม https://gist.github.com/<user>/<id>
+GIST_ID    = os.environ.get("GIST_ID", "").strip().rstrip("/").split("/")[-1].split("#")[0].split("?")[0]
 GIST_FILE  = "cutoffs.json"
 # ใช้ seed ครั้งแรกเท่านั้น (ตอนที่ไฟล์ใน gist ยังว่าง)
 DEFAULT_CUTOFFS = {
@@ -74,8 +75,14 @@ def _gist_request(method, body=None):
             "User-Agent":    "purchase-history-dashboard",
         },
     )
-    with urllib.request.urlopen(req, timeout=10) as r:
-        return json.loads(r.read().decode())
+    try:
+        with urllib.request.urlopen(req, timeout=10) as r:
+            return json.loads(r.read().decode())
+    except urllib.error.HTTPError as e:
+        hint = {401: "GIST_TOKEN ไม่ถูกต้อง/หมดอายุ",
+                403: "GIST_TOKEN ไม่มีสิทธิ์เขียน gist",
+                404: "ไม่เจอ gist -- เช็ก GIST_ID หรือ token ไม่มีสิทธิ์ gist"}.get(e.code, "")
+        raise RuntimeError(f"gist {method} HTTP {e.code} {hint} (GIST_ID={GIST_ID[:6]}..., len={len(GIST_ID)})") from None
 
 def _write_cutoffs(cutoffs):
     content = json.dumps(cutoffs, ensure_ascii=False, indent=2, sort_keys=True)

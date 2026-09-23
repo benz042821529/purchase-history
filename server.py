@@ -1103,6 +1103,11 @@ input[type=text]::placeholder{color:#bbb}
 .qbtn.active{background:#4f8ef7;color:#fff;border-color:#4f8ef7}
 .cutoffInput{width:160px;min-width:160px;padding:6px 4px;font-size:12px}
 .cutoffWrap{display:flex;align-items:center;gap:6px}
+#listTbl tr.groupRow{background:transparent;box-shadow:none}
+#listTbl tr.groupRow td{position:static;background:transparent;box-shadow:none;border:none;padding:14px 4px 4px;font-size:14px;font-weight:800}
+#listTbl tr.groupRow.pending td{color:#e67e22}
+#listTbl tr.groupRow.done td{color:#22a55b}
+#listTbl tr.settled td,#listTbl tr.settled td:last-child{background:#f3fbf6}
 .settledMark{width:18px;font-size:16px;color:#22a55b;font-weight:800;text-align:center}
 .cutoffLabel{font-size:13px;color:#1a1a2e;font-weight:700;padding:8px 0}
 </style>
@@ -1217,13 +1222,23 @@ function filterListByName(){
 }
 
 function renderList(rows){
-  document.getElementById('listBody').innerHTML=rows.map((b,i)=>{
+  // แยก 2 กลุ่ม: ยังไม่ได้ตัดยอดถึงปัจจุบัน (บน) / ตัดยอดแล้ว ✓ (ล่าง) -- ลำดับในกลุ่มคงเดิม
+  const pending=rows.filter(b=>!isSettled(b)), done=rows.filter(isSettled)
+  const group=(cls,label,list,start)=>list.length
+    ?`<tr class="groupRow ${cls}"><td colspan="11">${label} (${list.length} คน)</td></tr>`+list.map((b,i)=>rowHtml(b,start+i)).join('')
+    :''
+  document.getElementById('listBody').innerHTML=
+    group('pending','⏳ ยังไม่ได้ตัดยอดถึงวันที่ซื้อล่าสุด',pending,0)+
+    group('done','✓ ตัดยอดถึงปัจจุบันแล้ว',done,pending.length)
+}
+
+function rowHtml(b,i){
     const name=b.displayName||b.username||('ID '+b.userId)
     const last=b.lastTs?fmtParts(b.lastTs).date:'-'
     const pay=b.commissionPay!=null?b.commissionPay:(b.commissionBase||0)*COMMISSION_RATE
     const buyerPay=b.buyerPay!=null?b.buyerPay:splitComm(pay).buyer
     const ownerPay=b.ownerPay!=null?b.ownerPay:splitComm(pay).owner
-    return `<tr class="clickable" onclick="openDetail(${b.userId},'${(name+'').replace(/'/g,"\\\\'")}')">
+    return `<tr class="clickable${isSettled(b)?' settled':''}" onclick="openDetail(${b.userId},'${(name+'').replace(/'/g,"\\\\'")}')">
       <td class="rank">${i+1}</td>
       <td><img class="thumb" src="${b.avatar||BLANK_PX}"></td>
       <td><div class="name-cell">${name}</div><div class="uid-cell">User ID ${b.userId}${b.username&&b.username!==name?' · @'+b.username:''}</div></td>
@@ -1236,7 +1251,6 @@ function renderList(rows){
       <td class="date-cell">${last}</td>
       <td onclick="event.stopPropagation()"><div class="cutoffWrap"><input type="date" class="cutoffInput" value="${b.cutoffDate||''}" onchange="saveCutoff(${b.userId},this.value,this)"><span class="settledMark" title="ตัดยอดถึงวันที่ซื้อล่าสุดแล้ว">${isSettled(b)?'✓':''}</span></div></td>
     </tr>`
-  }).join('')
 }
 
 // ตัดยอดถึงปัจจุบันแล้ว = วันตัดยอด >= วันที่ซื้อล่าสุด (เทียบแบบ YYYY-MM-DD ตามเวลาเครื่อง)
@@ -1257,7 +1271,7 @@ async function saveCutoff(uid,date,el){
     if(!res.ok){alert('บันทึกวันตัดยอดไม่สำเร็จ')}
     else{
       const b=_listRows.find(x=>x.userId===uid)
-      if(b){b.cutoffDate=date||null;el.parentElement.querySelector('.settledMark').textContent=isSettled(b)?'✓':''}
+      if(b){b.cutoffDate=date||null;filterListByName()}
     }
   }catch(e){alert('เกิดข้อผิดพลาด: '+e.message)}
   el.disabled=false

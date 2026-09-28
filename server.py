@@ -483,7 +483,8 @@ OWNER_ID = 8486039661
 COMMISSION_RATE = 0.40
 
 def entry_earns_commission(e):
-    if (e.get("p") or 0) < COMMISSION_MIN_PRICE:
+    # ของราคา 5 โรพอดีหรือต่ำกว่าไม่นับ (ตรงกับ entryEarnsCommission ฝั่งเกมที่ใช้ <= COMMISSION_MIN_PRICE)
+    if (e.get("p") or 0) <= COMMISSION_MIN_PRICE:
         return False
     if e.get("tp") == "B":
         return True
@@ -514,7 +515,21 @@ def fetch_commission_data():
     for b in data:
         b["avatar"] = avatars.get(b.get("userId"), "")
 
+    # commissionBase ใน index สะสมมาตั้งแต่ก่อนเปลี่ยนเกณฑ์ (เดิมนับของราคา 5 โรด้วย) -- คำนวณฐานใหม่จาก log จริงทุกชิ้นด้วยเกณฑ์ปัจจุบันแทน
+    # (อ่านอย่างเดียว ไม่เขียนกลับ Roblox) ถ้าดึง log ไม่สำเร็จค่อยถอยไปใช้ตัวเลขใน index
+    recomputed = None
+    try:
+        recomputed = {}
+        for e in fetch_all_history():
+            if entry_earns_commission(e):
+                recomputed[e["uid"]] = recomputed.get(e["uid"], 0) + (e.get("p") or 0)
+    except Exception as err:
+        print(f"[commission] recompute from logs failed, using index commissionBase: {err}")
+        recomputed = None
+
     for b in data:
+        if recomputed is not None:
+            b["commissionBase"] = recomputed.get(b.get("userId"), 0)
         # ของเจ้าของแมพเองไม่นับค่าคอม -- commissionBase ที่เก็บใน index มาจากฝั่งเกม (ยังไม่ได้กันเจ้าของไว้ตรงนั้น) เลยต้องกันตรงนี้แทน totalSpent/purchaseCount ยังโชว์จริงตามปกติ แค่ค่าคอมเป็น 0
         base = 0 if b.get("userId") == OWNER_ID else (b.get("commissionBase") or 0)
         b["commissionPay"] = round(base * COMMISSION_RATE, 2)
@@ -1155,7 +1170,7 @@ input[type=text]::placeholder{color:#bbb}
 
 <div style="max-width:1400px;margin:0 auto 18px">
   <h1>ค่าคอมมิชชั่น</h1>
-  <div class="sub">ค่าคอม = 40% ของยอดที่เข้าเกณฑ์ (ไม่นับไอเทม &lt;5 Robux และ Limited) — ยอดสะสมทั้งหมด ยังไม่หักส่วนที่จ่ายไปแล้ว กดชื่อเพื่อดูรายการซื้อ</div>
+  <div class="sub">ค่าคอม = 40% ของยอดที่เข้าเกณฑ์ (ไม่นับไอเทมราคา 5 Robux ลงไป และ Limited) — ยอดสะสมทั้งหมด ยังไม่หักส่วนที่จ่ายไปแล้ว กดชื่อเพื่อดูรายการซื้อ</div>
 </div>
 
 <button class="back" id="backBtn" onclick="showList()">← กลับไปรายชื่อทั้งหมด</button>

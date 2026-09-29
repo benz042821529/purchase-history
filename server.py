@@ -398,11 +398,11 @@ def fetch_item_details(items):
     return result
 
 
-def list_all_keys():
+def list_all_keys(ds_name=DS_NAME, prefix="P_"):
     keys = []
     cursor = None
     while True:
-        params = {"datastoreName": DS_NAME, "limit": 100, "prefix": "P_"}
+        params = {"datastoreName": ds_name, "limit": 100, "prefix": prefix}
         if cursor:
             params["cursor"] = cursor
         try:
@@ -567,6 +567,49 @@ def fetch_commission_data_ranged(from_ts, to_ts):
         b["ownerPay"] = round(b["commissionPay"] - b["buyerPay"], 2)
 
     return data
+
+
+# log การซื้อผ่านหน้า Inspect ของ Roblox เอง (ปุ่ม "🛒 ซื้อชุดเต็ม") -- เขียนโดย PurchaseHistoryServer ฝั่งเกม
+# แยกขาดจาก PurchaseLog_v1: ไม่นับเข้ายอดซื้อ/ค่าคอมในหน้าอื่นเลย หน้านี้อ่านอย่างเดียว
+# แถว ev = open (กดเปิดหน้า Inspect) / buy (ตรวจเจอว่าซื้อ) / done (จบการเฝ้า) / skip
+INSPECT_DS_NAME = "InspectPurchaseLog_v1"
+
+def fetch_inspect_log():
+    ck = ("inspect",)
+    cached = cache_get(ck, 60)
+    if cached is not None:
+        return cached
+
+    def fetch_key(key):
+        try:
+            uid = int(key[2:])
+        except ValueError:
+            return []
+        try:
+            data = roblox_get(
+                f"{BASE}/standard-datastores/datastore/entries/entry",
+                {"datastoreName": INSPECT_DS_NAME, "entryKey": key}
+            )
+        except urllib.error.HTTPError as e:
+            if e.code != 404:
+                print(f"[fetch_inspect {key}] HTTP {e.code}")
+            return []
+        except Exception as e:
+            print(f"[fetch_inspect {key}] {e}")
+            return []
+        if not isinstance(data, list):
+            return []
+        for r in data:
+            r["uid"] = uid
+        return data
+
+    rows = []
+    with ThreadPoolExecutor(max_workers=10) as ex:
+        for result in ex.map(fetch_key, list_all_keys(INSPECT_DS_NAME, "I_")):
+            rows.extend(result)
+    rows.sort(key=lambda r: r.get("ts") or 0, reverse=True)
+    cache_set(ck, rows)
+    return rows
 
 
 def add_outstanding_commission(buyers, cutoffs):
@@ -1486,6 +1529,216 @@ window.addEventListener('DOMContentLoaded',()=>{
 </body>
 </html>"""
 
+# ── หน้า "ซื้อผ่านหน้า Inspect" แบบแยก URL ลับ (เหมือน /all/) -- อ่าน InspectPurchaseLog_v1 อย่างเดียว ไม่ปนกับยอดซื้อ/ค่าคอม ──
+INSPECT_HTML = """<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>ซื้อผ่านหน้า Inspect</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#f0f2f7;color:#1a1a2e;font-family:'Segoe UI',sans-serif;padding:28px 16px}
+h1{color:#1a1a2e;font-size:22px;font-weight:700;margin-bottom:4px}
+.sub{color:#888;font-size:12px;margin-bottom:22px;line-height:1.6}
+.wrap{max-width:1100px;margin:0 auto}
+.card{background:#fff;border:1px solid #e4e6ef;border-radius:14px;padding:16px 20px;margin:0 auto 14px;box-shadow:0 1px 4px rgba(0,0,0,.06)}
+.btn{padding:8px 18px;background:#4f8ef7;border:none;border-radius:9px;color:#fff;font-size:13px;font-weight:700;cursor:pointer}
+.btn:hover{background:#3a7de8}
+.date-row{display:flex;flex-wrap:wrap;gap:10px;align-items:flex-end}
+.fg{display:flex;flex-direction:column;gap:4px}
+.fg label{font-size:11px;color:#aaa;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+input[type=date],input[type=text]{padding:8px 10px;background:#f7f8fc;border:1.5px solid #e4e6ef;border-radius:9px;color:#1a1a2e;font-size:13px;outline:none}
+input[type=text]{min-width:200px}
+input:focus{border-color:#4f8ef7;background:#fff}
+.qrow{display:flex;gap:6px;align-items:flex-end;flex-wrap:wrap}
+.qbtn{padding:8px 14px;background:#f7f8fc;border:1.5px solid #e4e6ef;border-radius:9px;color:#888;font-size:12px;cursor:pointer;font-weight:600}
+.qbtn:hover{border-color:#4f8ef7;color:#4f8ef7}
+.qbtn.active{background:#4f8ef7;color:#fff;border-color:#4f8ef7}
+.tabs{display:flex;gap:6px;margin:0 auto 12px}
+.status{margin:0 auto 10px;font-size:13px;color:#aaa;min-height:16px}
+.status.err{color:#ef4444}.status.ok{color:#22c55e}
+.stats{margin:0 auto 14px;display:flex;gap:10px;flex-wrap:wrap}
+.stat{flex:1;min-width:130px;background:#fff;border:1px solid #e4e6ef;border-radius:12px;padding:14px;text-align:center;box-shadow:0 1px 3px rgba(0,0,0,.04)}
+.stat .val{font-size:22px;font-weight:700;color:#4f8ef7}
+.stat .lbl{font-size:11px;color:#aaa;margin-top:3px;font-weight:600;letter-spacing:.3px}
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:separate;border-spacing:0 5px;font-size:13px}
+thead th{padding:6px 12px;color:#bbb;font-size:11px;letter-spacing:.3px;text-align:left;font-weight:600;white-space:nowrap}
+tbody tr{background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.05)}
+td{padding:10px 12px;border-top:1px solid #f0f2f7;border-bottom:1px solid #f0f2f7;vertical-align:middle}
+td:first-child{border-left:1px solid #f0f2f7;border-radius:10px 0 0 10px}
+td:last-child{border-right:1px solid #f0f2f7;border-radius:0 10px 10px 0}
+.thumb{width:50px;height:50px;border-radius:8px;object-fit:cover;background:#f0f2f7;display:block}
+.name{color:#1a1a2e;font-weight:700}
+.muted{color:#aaa;font-size:11px;margin-top:2px}
+.item-name{color:#1a1a2e;font-weight:600}
+.price{color:#f59e0b;font-weight:700;white-space:nowrap}
+.badge{display:inline-block;padding:3px 8px;border-radius:6px;font-size:11px;font-weight:700;white-space:nowrap}
+.blim{background:#fff7e6;color:#d97706}
+.bok{background:#f0fdf4;color:#16a34a}.bwarn{background:#fff7ed;color:#ea580c}.bgray{background:#f3f4f6;color:#6b7280}.bblue{background:#eff6ff;color:#3b82f6}
+.num{font-weight:700;text-align:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>ซื้อผ่านหน้า Inspect</h1>
+  <div class="sub">การซื้อที่เกิดในหน้า Inspect ของ Roblox เอง (ปุ่ม "🛒 ซื้อชุดเต็ม" ในแมพ) ซึ่งไม่ผ่านระบบบันทึกปกติ — เก็บแยกต่างหาก <b>ไม่นับรวม</b>ในยอดซื้อหรือค่าคอมของหน้าอื่น<br>
+  ระบบตรวจจากไอเทมที่ผู้เล่นได้เป็นเจ้าของเพิ่มหลังเปิดหน้า Inspect (เช็คที่ 30 วิ, 1, 2, 5, 10 นาที) เวลาที่แสดงจึงเป็น "ช่วง" ที่ซื้อ ไม่ใช่เวลาเป๊ะ</div>
+
+  <div class="card">
+    <div class="date-row">
+      <div class="fg"><label>จากวันที่</label><input type="date" id="fromDate" onchange="render()"></div>
+      <div class="fg"><label>ถึงวันที่</label><input type="date" id="toDate" onchange="render()"></div>
+      <div class="qrow">
+        <button class="qbtn rbtn" onclick="quickFilter(1,this)">วันนี้</button>
+        <button class="qbtn rbtn" onclick="quickFilter(7,this)">7 วัน</button>
+        <button class="qbtn rbtn" onclick="quickFilter(30,this)">30 วัน</button>
+        <button class="qbtn rbtn active" onclick="quickFilter(0,this)">ทั้งหมด</button>
+      </div>
+      <div class="fg"><label>ค้นหาผู้ซื้อ</label><input type="text" id="q" placeholder="ชื่อ หรือ User ID" oninput="render()"></div>
+      <button class="btn" onclick="load()">โหลดใหม่</button>
+    </div>
+  </div>
+
+  <div class="status" id="status"></div>
+  <div class="stats" id="stats" style="display:none">
+    <div class="stat"><div class="val" id="sItems">0</div><div class="lbl">ชิ้นที่ซื้อ</div></div>
+    <div class="stat"><div class="val" id="sTotal">0</div><div class="lbl">ยอดรวม (Robux)</div></div>
+    <div class="stat"><div class="val" id="sBuyers">0</div><div class="lbl">คนที่ซื้อ</div></div>
+    <div class="stat"><div class="val" id="sOpens">0</div><div class="lbl">ครั้งที่เปิดหน้า Inspect</div></div>
+  </div>
+
+  <div class="tabs">
+    <button class="qbtn tbtn active" onclick="setTab('buy',this)">🛒 รายการที่ซื้อ</button>
+    <button class="qbtn tbtn" onclick="setTab('open',this)">👁 การเปิดหน้า Inspect</button>
+  </div>
+
+  <div class="tbl-wrap" id="buyWrap">
+    <table>
+      <thead><tr><th></th><th>ผู้ซื้อ</th><th>สินค้า</th><th>ผู้สร้าง</th><th>ราคา</th><th>ดูชุดของ</th><th>ซื้อในช่วง</th></tr></thead>
+      <tbody id="buyBody"></tbody>
+    </table>
+  </div>
+  <div class="tbl-wrap" id="openWrap" style="display:none">
+    <table>
+      <thead><tr><th>เปิดเมื่อ</th><th>ผู้ซื้อ</th><th>ดูชุดของ</th><th>ชิ้นในชุด</th><th>มีอยู่แล้ว</th><th>ยังไม่มี</th><th>ซื้อ</th><th>ยอด</th><th>สถานะ</th></tr></thead>
+      <tbody id="openBody"></tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+const TOKEN='__VIEW_TOKEN__'
+const BLANK_PX="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
+let _rows=[],_itemMap={},_tab='buy'
+function pad(n){return String(n).padStart(2,'0')}
+function fmtDate(ts){const d=new Date(ts*1000);return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`}
+function fmtTime(ts){const d=new Date(ts*1000);return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`}
+function toISO(ts){const d=new Date(ts*1000);return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`}
+function dateToTs(s,end){if(!s)return null;const[y,m,d]=s.split('-').map(Number);return Math.floor(new Date(y,m-1,d,end?23:0,end?59:0,end?59:0).getTime()/1000)}
+function esc(s){return String(s==null?'':s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function fmtR(n){return 'R$ '+(n||0).toLocaleString()}
+function who(r){const d=r.buyerDisplay||r.buyer||('ID '+r.uid);return `<div class="name">${esc(d)}</div><div class="muted">@${esc(r.buyer||'?')} · ${r.uid}</div>`}
+function whose(r){return `<div class="name">${esc(r.fromName||('ID '+r.from))}</div><div class="muted">${r.from||''}</div>`}
+const PSRC={reported:['ราคาที่ผู้เล่นเห็น','bok'],catalog_now:['ราคาปัจจุบัน','bblue'],unknown:['ไม่ทราบราคา','bwarn']}
+
+function quickFilter(days,btn){
+  document.querySelectorAll('.rbtn').forEach(b=>b.classList.remove('active'));btn.classList.add('active')
+  if(!days){fromDate.value='';toDate.value=''}
+  else{const now=new Date(),f=new Date(now);f.setDate(now.getDate()-days+1);f.setHours(0,0,0,0)
+    fromDate.value=toISO(f.getTime()/1000);toDate.value=toISO(now.getTime()/1000)}
+  render()
+}
+function setTab(t,btn){
+  _tab=t;document.querySelectorAll('.tbtn').forEach(b=>b.classList.remove('active'));btn.classList.add('active')
+  buyWrap.style.display=t==='buy'?'block':'none';openWrap.style.display=t==='open'?'block':'none'
+}
+
+function filtered(){
+  const f=dateToTs(fromDate.value,false),t=dateToTs(toDate.value,true)
+  const q=(document.getElementById('q').value||'').trim().toLowerCase()
+  return _rows.filter(r=>{
+    if(f!==null&&(r.ts||0)<f)return false
+    if(t!==null&&(r.ts||0)>t)return false
+    if(q&&!((r.buyer||'').toLowerCase().includes(q)||(r.buyerDisplay||'').toLowerCase().includes(q)||String(r.uid).includes(q)))return false
+    return true
+  })
+}
+
+function render(){
+  const rows=filtered()
+  const buys=rows.filter(r=>r.ev==='buy')
+  const opens=rows.filter(r=>r.ev==='open'||r.ev==='skip')
+  sItems.textContent=buys.length.toLocaleString()
+  sTotal.textContent=fmtR(buys.reduce((s,r)=>s+(r.p||0),0))
+  sBuyers.textContent=new Set(buys.map(r=>r.uid)).size.toLocaleString()
+  sOpens.textContent=opens.length.toLocaleString()
+  stats.style.display='flex'
+
+  buyBody.innerHTML=buys.length?buys.map(r=>{
+    const ps=PSRC[r.pSrc]||['-','bgray']
+    const win=r.boughtAfter&&r.boughtBefore
+      ?`${fmtDate(r.boughtBefore)}<div class="muted">${fmtTime(r.boughtAfter)} – ${fmtTime(r.boughtBefore)}</div>`
+      :fmtDate(r.ts)+`<div class="muted">${fmtTime(r.ts)}</div>`
+    return `<tr>
+      <td><img class="thumb" data-key="A_${r.id}" src="${esc((_itemMap['A_'+r.id]||{}).thumb||BLANK_PX)}"></td>
+      <td>${who(r)}</td>
+      <td><div class="item-name">${esc(r.nm||('ID:'+r.id))}</div><div class="muted">ID ${r.id}${r.lim?' · <span class="badge blim">💎 Limited</span>':''}</div></td>
+      <td><span class="muted" style="font-size:12px">${esc(r.cr||'—')}</span></td>
+      <td><div class="price">${r.p?fmtR(r.p):'ฟรี'}</div><div style="margin-top:3px"><span class="badge ${ps[1]}">${ps[0]}</span></div></td>
+      <td>${whose(r)}</td>
+      <td>${win}</td>
+    </tr>`}).join(''):'<tr><td colspan="7" style="text-align:center;color:#aaa">ยังไม่มีรายการซื้อในช่วงนี้</td></tr>'
+
+  // จับคู่แถว open กับ done ของรอบเดียวกัน (ผู้ซื้อ + เวลาเปิด + ชุดของใคร)
+  const doneMap={}
+  _rows.filter(r=>r.ev==='done').forEach(r=>{doneMap[r.uid+'|'+r.opened+'|'+r.from]=r})
+  const now=Date.now()/1000
+  openBody.innerHTML=opens.length?opens.map(r=>{
+    if(r.ev==='skip')return `<tr><td>${fmtDate(r.ts)}<div class="muted">${fmtTime(r.ts)}</div></td><td>${who(r)}</td><td>${whose(r)}</td><td colspan="5" class="muted">—</td><td><span class="badge bgray">ข้าม (เปิดซ้อนเกิน 3 ครั้ง)</span></td></tr>`
+    const d=doneMap[r.uid+'|'+r.opened+'|'+r.from]
+    let st
+    if(d)st=d.left?'<span class="badge bwarn">ออกจากเกมก่อนเช็คครบ</span>':'<span class="badge bok">เช็คครบแล้ว</span>'
+    else if(now-(r.opened||r.ts)<700)st='<span class="badge bblue">กำลังเช็ค…</span>'
+    else st='<span class="badge bgray">ไม่มีผลสรุป</span>'
+    const notOwned=Array.isArray(r.notOwned)?r.notOwned.length:0
+    return `<tr>
+      <td>${fmtDate(r.ts)}<div class="muted">${fmtTime(r.ts)}</div></td>
+      <td>${who(r)}</td><td>${whose(r)}</td>
+      <td class="num">${r.outfitN??'-'}</td><td class="num">${r.ownedBefore??'-'}</td><td class="num">${notOwned}</td>
+      <td class="num">${d?d.bought:'-'}</td><td class="price">${d?fmtR(d.total):'-'}</td>
+      <td>${st}${r.descOk===false?'<div class="muted">ดึงชุดไม่สำเร็จ</div>':''}</td>
+    </tr>`}).join(''):'<tr><td colspan="9" style="text-align:center;color:#aaa">ยังไม่มีการเปิดหน้า Inspect ในช่วงนี้</td></tr>'
+}
+
+async function loadThumbs(){
+  const ids=[...new Set(_rows.filter(r=>r.ev==='buy'&&r.id).map(r=>r.id))].filter(id=>!_itemMap['A_'+id])
+  if(!ids.length)return
+  try{
+    const res=await fetch('/api/item-details',{method:'POST',headers:{'Content-Type':'application/json','X-View-Token':TOKEN},body:JSON.stringify(ids.map(id=>({id,tp:'A'})))})
+    Object.assign(_itemMap,await res.json())
+    document.querySelectorAll('img.thumb[data-key]').forEach(img=>{const t=(_itemMap[img.dataset.key]||{}).thumb;if(t)img.src=t})
+  }catch{}
+}
+
+async function load(){
+  status.className='status';status.textContent='กำลังโหลด...'
+  try{
+    const res=await fetch('/api/inspect-log?token='+encodeURIComponent(TOKEN))
+    if(res.status===401||res.status===403){status.className='status err';status.textContent='ลิงก์ไม่ถูกต้อง';return}
+    const data=await res.json()
+    if(!res.ok){status.className='status err';status.textContent='Error: '+(data.message||res.status);return}
+    _rows=data.rows||[]
+    status.className='status ok';status.textContent=_rows.length?`โหลดแล้ว ${_rows.length} แถว`:'ยังไม่มีข้อมูล (ระบบเริ่มเก็บหลัง Publish แมพ)'
+    render();loadThumbs()
+  }catch(e){status.className='status err';status.textContent='เกิดข้อผิดพลาด: '+e.message}
+}
+window.addEventListener('DOMContentLoaded',load)
+</script>
+</body>
+</html>"""
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print(f"  {args[0]} {args[1]}")
@@ -1538,6 +1791,25 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(b)))
             self.end_headers()
             self.wfile.write(b)
+            return
+        if parsed.path.startswith("/inspect/") and token_ok(parsed.path[len("/inspect/"):]):
+            b = INSPECT_HTML.replace("__VIEW_TOKEN__", VIEW_TOKEN).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html;charset=utf-8")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+            return
+        if parsed.path == "/api/inspect-log":
+            p     = urllib.parse.parse_qs(parsed.query)
+            token = (p.get("token") or [""])[0]
+            if not (self._check_auth() or self._check_view() or token_ok(token)):
+                self._json(401, {"message": "Unauthorized"}); return
+            try:
+                self._json(200, {"rows": fetch_inspect_log()})
+            except Exception as e:
+                print(f"[inspect-log error] {e}")
+                self._json(500, {"message": str(e)})
             return
         if parsed.path.startswith("/commission/") and token_ok(parsed.path[len("/commission/"):]):
             b = COMMISSION_HTML.replace("__VIEW_TOKEN__", VIEW_TOKEN).encode()

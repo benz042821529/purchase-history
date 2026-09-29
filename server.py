@@ -1555,7 +1555,6 @@ input:focus{border-color:#4f8ef7;background:#fff}
 .qbtn{padding:8px 14px;background:#f7f8fc;border:1.5px solid #e4e6ef;border-radius:9px;color:#888;font-size:12px;cursor:pointer;font-weight:600}
 .qbtn:hover{border-color:#4f8ef7;color:#4f8ef7}
 .qbtn.active{background:#4f8ef7;color:#fff;border-color:#4f8ef7}
-.tabs{display:flex;gap:6px;margin:0 auto 12px}
 .status{margin:0 auto 10px;font-size:13px;color:#aaa;min-height:16px}
 .status.err{color:#ef4444}.status.ok{color:#22c55e}
 .stats{margin:0 auto 14px;display:flex;gap:10px;flex-wrap:wrap}
@@ -1609,21 +1608,11 @@ td:last-child{border-right:1px solid #f0f2f7;border-radius:0 10px 10px 0}
     <div class="stat"><div class="val" id="sOpens">0</div><div class="lbl">ครั้งที่เปิดหน้า Inspect</div></div>
   </div>
 
-  <div class="tabs">
-    <button class="qbtn tbtn active" onclick="setTab('buy',this)">🛒 รายการที่ซื้อ</button>
-    <button class="qbtn tbtn" onclick="setTab('open',this)">👁 การเปิดหน้า Inspect</button>
-  </div>
-
-  <div class="tbl-wrap" id="buyWrap">
+  <!-- ลิสต์เดียวรวมทุกเหตุการณ์ (ซื้อ + เปิดหน้า Inspect) เรียงใหม่สุดก่อน -->
+  <div class="tbl-wrap">
     <table>
-      <thead><tr><th></th><th>ผู้ซื้อ</th><th>สินค้า</th><th>ผู้สร้าง</th><th>ราคา</th><th>ดูชุดของ</th><th>ซื้อในช่วง</th></tr></thead>
-      <tbody id="buyBody"></tbody>
-    </table>
-  </div>
-  <div class="tbl-wrap" id="openWrap" style="display:none">
-    <table>
-      <thead><tr><th>เปิดเมื่อ</th><th>ผู้ซื้อ</th><th>ดูชุดของ</th><th>ชิ้นในชุด</th><th>มีอยู่แล้ว</th><th>ยังไม่มี</th><th>ซื้อ</th><th>ยอด</th><th>สถานะ</th></tr></thead>
-      <tbody id="openBody"></tbody>
+      <thead><tr><th></th><th>เวลา</th><th>เหตุการณ์</th><th>ผู้ซื้อ</th><th>รายละเอียด</th><th>ราคา / ยอด</th><th>ดูชุดของ</th></tr></thead>
+      <tbody id="listBody"></tbody>
     </table>
   </div>
 </div>
@@ -1631,7 +1620,7 @@ td:last-child{border-right:1px solid #f0f2f7;border-radius:0 10px 10px 0}
 <script>
 const TOKEN='__VIEW_TOKEN__'
 const BLANK_PX="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
-let _rows=[],_itemMap={},_tab='buy'
+let _rows=[],_itemMap={}
 function pad(n){return String(n).padStart(2,'0')}
 function fmtDate(ts){const d=new Date(ts*1000);return `${pad(d.getDate())}/${pad(d.getMonth()+1)}/${d.getFullYear()}`}
 function fmtTime(ts){const d=new Date(ts*1000);return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`}
@@ -1649,10 +1638,6 @@ function quickFilter(days,btn){
   else{const now=new Date(),f=new Date(now);f.setDate(now.getDate()-days+1);f.setHours(0,0,0,0)
     fromDate.value=toISO(f.getTime()/1000);toDate.value=toISO(now.getTime()/1000)}
   render()
-}
-function setTab(t,btn){
-  _tab=t;document.querySelectorAll('.tbtn').forEach(b=>b.classList.remove('active'));btn.classList.add('active')
-  buyWrap.style.display=t==='buy'?'block':'none';openWrap.style.display=t==='open'?'block':'none'
 }
 
 function filtered(){
@@ -1676,27 +1661,41 @@ function render(){
   sOpens.textContent=opens.length.toLocaleString()
   stats.style.display='flex'
 
-  buyBody.innerHTML=buys.length?buys.map(r=>{
-    const ps=PSRC[r.pSrc]||['-','bgray']
-    const win=r.boughtAfter&&r.boughtBefore
-      ?`${fmtDate(r.boughtBefore)}<div class="muted">${fmtTime(r.boughtAfter)} – ${fmtTime(r.boughtBefore)}</div>`
-      :fmtDate(r.ts)+`<div class="muted">${fmtTime(r.ts)}</div>`
-    return `<tr>
-      <td><img class="thumb" data-key="A_${r.id}" src="${esc((_itemMap['A_'+r.id]||{}).thumb||BLANK_PX)}"></td>
-      <td>${who(r)}</td>
-      <td><div class="item-name">${esc(r.nm||('ID:'+r.id))}</div><div class="muted">ID ${r.id}${r.lim?' · <span class="badge blim">💎 Limited</span>':''}</div></td>
-      <td><span class="muted" style="font-size:12px">${esc(r.cr||'—')}</span></td>
-      <td><div class="price">${r.p?fmtR(r.p):'ฟรี'}</div><div style="margin-top:3px"><span class="badge ${ps[1]}">${ps[0]}</span></div></td>
-      <td>${whose(r)}</td>
-      <td>${win}</td>
-    </tr>`}).join(''):'<tr><td colspan="7" style="text-align:center;color:#aaa">ยังไม่มีรายการซื้อในช่วงนี้</td></tr>'
-
-  // จับคู่แถว open กับ done ของรอบเดียวกัน (ผู้ซื้อ + เวลาเปิด + ชุดของใคร)
+  // จับคู่แถว done กับ open ของรอบเดียวกัน (ผู้ซื้อ + เวลาเปิด + ชุดของใคร) -- done ไม่แสดงเป็นแถวเอง แต่ไปโชว์เป็นสถานะในแถว open
   const doneMap={}
   _rows.filter(r=>r.ev==='done').forEach(r=>{doneMap[r.uid+'|'+r.opened+'|'+r.from]=r})
   const now=Date.now()/1000
-  openBody.innerHTML=opens.length?opens.map(r=>{
-    if(r.ev==='skip')return `<tr><td>${fmtDate(r.ts)}<div class="muted">${fmtTime(r.ts)}</div></td><td>${who(r)}</td><td>${whose(r)}</td><td colspan="5" class="muted">—</td><td><span class="badge bgray">ข้าม (เปิดซ้อนเกิน 3 ครั้ง)</span></td></tr>`
+  const timeCell=ts=>`${fmtDate(ts)}<div class="muted">${fmtTime(ts)}</div>`
+
+  // ลิสต์เดียว: ซื้อ + เปิดหน้า Inspect + ข้าม เรียงใหม่สุดก่อน (buy ใช้เวลาที่ตรวจเจอ)
+  const list=rows.filter(r=>r.ev==='buy'||r.ev==='open'||r.ev==='skip').sort((a,b)=>(b.ts||0)-(a.ts||0))
+  listBody.innerHTML=list.length?list.map(r=>{
+    if(r.ev==='buy'){
+      const ps=PSRC[r.pSrc]||['-','bgray']
+      const time=r.boughtAfter&&r.boughtBefore
+        ?`${fmtDate(r.boughtBefore)}<div class="muted">${fmtTime(r.boughtAfter)} – ${fmtTime(r.boughtBefore)}</div>`
+        :timeCell(r.ts)
+      return `<tr>
+        <td><img class="thumb" data-key="A_${r.id}" src="${esc((_itemMap['A_'+r.id]||{}).thumb||BLANK_PX)}"></td>
+        <td>${time}</td>
+        <td><span class="badge bok">🛒 ซื้อ</span></td>
+        <td>${who(r)}</td>
+        <td><div class="item-name">${esc(r.nm||('ID:'+r.id))}</div><div class="muted">${esc(r.cr||'—')} · ID ${r.id}${r.lim?' · <span class="badge blim">💎 Limited</span>':''}</div></td>
+        <td><div class="price">${r.p?fmtR(r.p):'ฟรี'}</div><div style="margin-top:3px"><span class="badge ${ps[1]}">${ps[0]}</span></div></td>
+        <td>${whose(r)}</td>
+      </tr>`
+    }
+    if(r.ev==='skip'){
+      return `<tr>
+        <td style="font-size:22px;text-align:center">👁</td>
+        <td>${timeCell(r.ts)}</td>
+        <td><span class="badge bgray">ข้าม</span></td>
+        <td>${who(r)}</td>
+        <td class="muted">เปิดหน้า Inspect ซ้อนเกิน 3 ครั้ง ไม่ได้เฝ้าการซื้อรอบนี้</td>
+        <td class="muted">—</td>
+        <td>${whose(r)}</td>
+      </tr>`
+    }
     const d=doneMap[r.uid+'|'+r.opened+'|'+r.from]
     let st
     if(d)st=d.left?'<span class="badge bwarn">ออกจากเกมก่อนเช็คครบ</span>':'<span class="badge bok">เช็คครบแล้ว</span>'
@@ -1704,12 +1703,15 @@ function render(){
     else st='<span class="badge bgray">ไม่มีผลสรุป</span>'
     const notOwned=Array.isArray(r.notOwned)?r.notOwned.length:0
     return `<tr>
-      <td>${fmtDate(r.ts)}<div class="muted">${fmtTime(r.ts)}</div></td>
-      <td>${who(r)}</td><td>${whose(r)}</td>
-      <td class="num">${r.outfitN??'-'}</td><td class="num">${r.ownedBefore??'-'}</td><td class="num">${notOwned}</td>
-      <td class="num">${d?d.bought:'-'}</td><td class="price">${d?fmtR(d.total):'-'}</td>
-      <td>${st}${r.descOk===false?'<div class="muted">ดึงชุดไม่สำเร็จ</div>':''}</td>
-    </tr>`}).join(''):'<tr><td colspan="9" style="text-align:center;color:#aaa">ยังไม่มีการเปิดหน้า Inspect ในช่วงนี้</td></tr>'
+      <td style="font-size:22px;text-align:center">👁</td>
+      <td>${timeCell(r.ts)}</td>
+      <td><span class="badge bblue">เปิดหน้า Inspect</span></td>
+      <td>${who(r)}</td>
+      <td><div>ชุด ${r.outfitN??'-'} ชิ้น · มีแล้ว ${r.ownedBefore??'-'} · ยังไม่มี ${notOwned}</div><div style="margin-top:3px">${st}${r.descOk===false?' <span class="muted">ดึงชุดไม่สำเร็จ</span>':''}</div></td>
+      <td>${d?`<div class="price">${fmtR(d.total)}</div><div class="muted">ซื้อ ${d.bought} ชิ้น</div>`:'<span class="muted">—</span>'}</td>
+      <td>${whose(r)}</td>
+    </tr>`
+  }).join(''):'<tr><td colspan="7" style="text-align:center;color:#aaa">ยังไม่มีข้อมูลในช่วงนี้</td></tr>'
 }
 
 async function loadThumbs(){

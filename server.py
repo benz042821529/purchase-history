@@ -1465,7 +1465,8 @@ function renderDetail(){
   const items=_detailItems.filter(e=>(from===null||e.ts>=from)&&(to===null||e.ts<=to))
 
   document.getElementById('status').className='status ok'
-  document.getElementById('status').textContent=_detailName+' (ID '+_detailUid+')'+(from||to?' — กรองตามช่วงวันที่':'')
+  const uname=(_listRows.find(x=>x.userId===_detailUid)||{}).username
+  document.getElementById('status').textContent=_detailName+' ('+(uname&&uname!==_detailName?'@'+uname+' · ':'')+'ID '+_detailUid+')'+(from||to?' — กรองตามช่วงวันที่':'')
   document.getElementById('dItems').textContent=items.length.toLocaleString()
   document.getElementById('dAssets').textContent=items.filter(e=>e.tp!=='B').length.toLocaleString()
   document.getElementById('dBundles').textContent=items.filter(e=>e.tp==='B').length.toLocaleString()

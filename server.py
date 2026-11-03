@@ -280,30 +280,94 @@ def fetch_avatars(uids):
     return out
 
 
-def _asset_details(iid):
-    """ดึงแบบ Asset (economy v2 → fallback catalog) → (name, creator, price). อาจ raise RateLimited"""
-    name, creator, price = "", "", 0
-    # v2 รองรับทั้ง asset ปกติและ Collectible (UGC limited) — v1 ดึง collectible ไม่ได้
-    d = roblox_public(f"https://economy.roblox.com/v2/assets/{iid}/details")
-    if "errors" not in d:
-        name    = d.get("Name", "")
-        creator = d.get("Creator", {}).get("Name", "")
-        price   = d.get("PriceInRobux") or 0
-    if not name or not creator or not price:
-        ci = catalog_item_detail(iid, "A")
-        if ci:
-            name    = name    or ci.get("name", "")
-            creator = creator or ci.get("creatorName", "")
-            price   = price   or (ci.get("price") or 0)
-    return name, creator, price
+# --- ดึงชื่อ/ผู้สร้าง/รูปไอเทม (2026-11-03: ปรับให้เร็วขึ้น) ---
+# เดิมถาม catalog ทีละชิ้น (หลายร้อยครั้งต่อคน) → โดน 429 แล้ว backoff รวม ~23 วิ, ชิ้นที่ถูกลบไม่ถูกจำ เลยวนลองใหม่ทุกครั้ง, รูปดึงใหม่ทุกครั้ง
+# ตอนนี้: ถาม catalog เป็นชุดละ 100 ชิ้น, ชิ้นที่หาไม่เจอจำไว้ด้วย, จำรูปไว้ด้วย
+# ราคาในนี้ไม่ได้ใช้แสดงผล (คอลัมน์ราคาใช้ราคาที่จ่ายจริง e.p จาก log เสมอ) จึงไม่ต้องไล่ถามต่อเพราะ "ไม่มีราคา"
+# ไม่เกี่ยวกับการคิดค่าคอม/วันตัดยอด (ใช้ e.p / e.lim จาก log และ cutoffs จาก gist เท่านั้น)
+ITEM_TTL      = 6 * 3600   # จำชื่อ/ผู้สร้างของไอเทม
+MISS_TTL      = 6 * 3600   # จำว่าชิ้นนี้หาไม่เจอ (ถูกลบ/ปิด) จะได้ไม่วนถามซ้ำทุกครั้ง
+THUMB_TTL     = 6 * 3600
+CATALOG_BATCH = 100        # catalog รับได้ ~120 ชิ้นต่อครั้ง
 
 
-def _bundle_details(iid):
-    """ดึงแบบ Bundle (catalog) → (name, creator, price). อาจ raise RateLimited"""
-    ci = catalog_item_detail(iid, "B")
-    if ci:
-        return ci.get("name", ""), ci.get("creatorName", ""), ci.get("price") or 0
-    return "", "", 0
+def catalog_items_batch(pairs):
+    """ถาม catalog ทีละชุด: pairs = [(id, "A"|"B"), ...] -> {(tp, id): item}. ชิ้นที่ไม่เจอจะไม่อยู่ในผล. โดน 429 ซ้ำจน retry หมด -> raise RateLimited"""
+    global _catalog_csrf
+    url  = "https://catalog.roblox.com/v1/catalog/items/details"
+    body = json.dumps({"items": [{"itemType": "Bundle" if tp == "B" else "Asset", "id": iid} for iid, tp in pairs]}).encode()
+    rate_limited = False
+    for attempt in range(4):
+        headers = {"Content-Type": "application/json", "User-Agent": UA}
+        with _catalog_csrf_lock:
+            if _catalog_csrf:
+                headers["X-CSRF-Token"] = _catalog_csrf
+        req = urllib.request.Request(url, data=body, headers=headers, method="POST")
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                out = {}
+                for d in json.loads(r.read().decode()).get("data", []):
+                    tp = "B" if d.get("itemType") == "Bundle" else "A"
+                    out[(tp, d.get("id"))] = d
+                return out
+        except urllib.error.HTTPError as e:
+            token = e.headers.get("x-csrf-token")
+            if token:  # ครั้งแรกได้ 403 พร้อม token ใหม่ → ส่งซ้ำทันที
+                with _catalog_csrf_lock:
+                    _catalog_csrf = token
+                continue
+            if e.code == 429:
+                rate_limited = True
+                time.sleep(1 + attempt)
+                continue
+            print(f"[catalog batch] HTTP {e.code}")
+            break
+        except Exception as e:
+            print(f"[catalog batch] {e}")
+            break
+    if rate_limited:
+        raise RateLimited()
+    return {}
+
+
+def _economy_details(iid):
+    """สำรองสำหรับ Asset ที่ catalog ไม่ให้ข้อมูล (เช่น Collectible บางชิ้น) -> (name, creator, price) หรือ None ถ้าไม่มีจริง. อาจ raise RateLimited"""
+    for attempt in range(3):
+        try:
+            d = roblox_public(f"https://economy.roblox.com/v2/assets/{iid}/details")
+        except RateLimited:
+            if attempt == 2:
+                raise
+            time.sleep(1 + attempt)
+            continue
+        except urllib.error.HTTPError as e:
+            if e.code in (400, 404):
+                return None
+            raise
+        if "errors" in d or not d.get("Name"):
+            return None
+        return d.get("Name", ""), (d.get("Creator") or {}).get("Name", ""), d.get("PriceInRobux") or 0
+    return None
+
+
+def _cached_thumbs(ids, kind):
+    """เหมือน _thumb_batch แต่จำรูปที่ได้ไว้ / ชิ้นที่ไม่มีรูปจำไว้แค่ 10 นาที (เผื่อรูปยัง Pending อยู่ จะได้ถามใหม่ไม่นาน)"""
+    out, need = {}, []
+    for i in ids:
+        t = cache_get(("thumb", kind, i), THUMB_TTL)
+        if t:
+            out[i] = t
+        elif cache_get(("thumbmiss", kind, i), 600) is None:
+            need.append(i)
+    if need:
+        got = _thumb_batch(need, kind)
+        for i in need:
+            if i in got:
+                cache_set(("thumb", kind, i), got[i])
+            else:
+                cache_set(("thumbmiss", kind, i), True)
+        out.update(got)
+    return out
 
 
 def fetch_item_details(items):
@@ -315,86 +379,92 @@ def fetch_item_details(items):
 
     # Thumbnails — ลองตามชนิดที่ log ไว้ก่อน แล้ว cross-type สำหรับตัวที่ยังไม่ได้ (log ผิดชนิด)
     thumb_map = {}
-    thumb_map.update(_thumb_batch(assets, "asset"))
-    thumb_map.update(_thumb_batch(bundles, "bundle"))
+    thumb_map.update(_cached_thumbs(assets, "asset"))
+    thumb_map.update(_cached_thumbs(bundles, "bundle"))
     missing = [i for i in all_ids if i not in thumb_map]
     if missing:
-        thumb_map.update(_thumb_batch(missing, "bundle"))
+        thumb_map.update(_cached_thumbs(missing, "bundle"))
         missing = [i for i in all_ids if i not in thumb_map]
     if missing:
-        thumb_map.update(_thumb_batch(missing, "asset"))
+        thumb_map.update(_cached_thumbs(missing, "asset"))
 
-    # Creator names + price + item name (ลองทั้ง Asset และ Bundle ไม่ว่า log จะบอกชนิดไหน)
-    # คืน (key, data, transient):
-    #   data = {"name","creator","price"} เมื่อได้ข้อมูล
-    #   data = None + transient=True  → โดน 429 พลาดชั่วคราว ควรลองใหม่
-    #   data = None + transient=False → ไม่มีข้อมูลจริง (ถูกลบ) เลิกลอง
-    def get_details(item):
-        iid, tp = item["id"], item["tp"]
-        key = f"{tp}_{iid}"
-        # ลองชนิดที่ log ไว้ก่อน ถ้าไม่เจอค่อยลองอีกชนิด (กัน tp ที่ log มาผิด)
-        order = ["B", "A"] if tp == "B" else ["A", "B"]
-        name = creator = ""
-        price = 0
-        transient = False
-        for kind in order:
-            try:
-                n, c, p = _asset_details(iid) if kind == "A" else _bundle_details(iid)
-            except RateLimited:
-                transient = True
-                continue
-            except Exception as e:
-                print(f"[details {kind}_{iid}] {e}")
-                continue
-            name    = name    or n
-            creator = creator or c
-            price   = price   or p
-            if name:   # เจอชนิดที่ถูกแล้ว (มีชื่อ) ไม่ต้องลองอีกชนิด
-                break
-        if name or creator or price:
-            return key, {"name": name, "creator": creator, "price": price}, False
-        return key, None, transient
-
-    # ให้ทุก key มีที่อยู่ก่อน + ใส่ thumbnail + ดึงจาก cache รายชิ้น (เก็บเฉพาะที่เคยสำเร็จ)
+    # ให้ทุก key มีที่อยู่ก่อน + ใส่ thumbnail + ดึงจาก cache รายชิ้น
     pending = {}
     for it in unique:
         key = f"{it['tp']}_{it['id']}"
         result[key] = {"thumb": thumb_map.get(it["id"], ""), "name": "", "creator": "", "price": 0}
-        cached = cache_get(("item", key), 3600)
+        cached = cache_get(("item", key), ITEM_TTL)
         if cached is not None:
             if cached["name"]:  result[key]["name"] = cached["name"]
             result[key]["creator"] = cached["creator"]
             if cached["price"]: result[key]["price"] = cached["price"]
         else:
             pending[key] = it
+    if not pending:
+        return result
 
-    # retry จนครบ: ลองซ้ำเฉพาะอันที่โดน 429 พร้อม backoff, หยุดเมื่อครบหรือครบ 6 รอบ
-    MAX_ROUNDS = 6
-    for rnd in range(MAX_ROUNDS):
-        if not pending:
-            break
-        retry_next = {}
+    def apply(key, name, creator, price):
+        if name:  result[key]["name"] = name
+        result[key]["creator"] = creator or ""
+        if price: result[key]["price"] = price
+        cache_set(("item", key), {"name": name or "", "creator": creator or "", "price": price or 0})
+
+    transient = set()  # โดน rate limit จนดึงไม่ได้ — ไม่จำว่า "ไม่มี" ครั้งหน้าลองใหม่
+
+    def catalog_pass(keys, swap):
+        """ถาม catalog เป็นชุด ด้วยชนิดตาม log (swap=False) หรือชนิดตรงข้าม (swap=True — กัน log ผิดชนิด) -> คืน key ที่ยังไม่ได้ชื่อ"""
+        left = []
+        pairs = []
+        for k in keys:
+            it = pending[k]
+            tp = it["tp"] if it["tp"] == "B" else "A"
+            if swap:
+                tp = "A" if tp == "B" else "B"
+            pairs.append((k, it["id"], tp))
+        for i in range(0, len(pairs), CATALOG_BATCH):
+            chunk = pairs[i:i + CATALOG_BATCH]
+            try:
+                found = catalog_items_batch([(iid, tp) for _, iid, tp in chunk])
+            except RateLimited:
+                for k, _, _ in chunk:
+                    transient.add(k)
+                    left.append(k)
+                continue
+            for k, iid, tp in chunk:
+                ci = found.get((tp, iid))
+                if ci and ci.get("name"):
+                    apply(k, ci.get("name", ""), ci.get("creatorName", ""), ci.get("price") or ci.get("lowestPrice") or 0)
+                else:
+                    left.append(k)
+        return left
+
+    left = catalog_pass(list(pending), swap=False)
+    if left:
+        left = catalog_pass(left, swap=True)
+
+    # สำรองสุดท้าย: Asset ที่ catalog ไม่ให้ข้อมูล → economy v2 (รายชิ้น แต่เหลือน้อยมากแล้ว)
+    def econ(k):
+        try:
+            return k, _economy_details(pending[k]["id"]), False
+        except RateLimited:
+            return k, None, True
+        except Exception as e:
+            print(f"[details econ {k}] {e}")
+            return k, None, True
+    if left:
         with ThreadPoolExecutor(max_workers=4) as ex:
-            for key, data, transient in ex.map(get_details, list(pending.values())):
-                if data is not None:
-                    if data["name"]:
-                        result[key]["name"] = data["name"]
-                    result[key]["creator"] = data["creator"]
-                    if data["price"]:
-                        result[key]["price"] = data["price"]
-                    cache_set(("item", key), data)
-                elif transient:
-                    retry_next[key] = pending[key]
-                # ไม่มีข้อมูลจริง → ปล่อยไว้ ไม่ลองซ้ำ
-        pending = retry_next
-        if pending and rnd < MAX_ROUNDS - 1:
-            wait = min(2 ** rnd, 8)
-            print(f"[item-details] เหลือ {len(pending)} ชิ้นโดน rate limit — รอ {wait}s แล้วลองใหม่ (รอบ {rnd+2})")
-            time.sleep(wait)
+            for k, data, is_transient in ex.map(econ, left):
+                if data:
+                    apply(k, *data)
+                    transient.discard(k)
+                elif is_transient:
+                    transient.add(k)
+                elif k not in transient:
+                    # ไม่มีข้อมูลจริง (ถูกลบ/ปิด) → จำไว้ ครั้งหน้าไม่ต้องวนถามอีก
+                    cache_set(("item", k), {"name": "", "creator": "", "price": 0})
 
-    if pending:
-        print(f"[item-details] ยังเหลือ {len(pending)} ชิ้นดึงไม่ครบหลัง {MAX_ROUNDS} รอบ")
-
+    if transient:
+        print(f"[item-details] {len(transient)} ชิ้นโดน rate limit ดึงไม่ครบ จะลองใหม่ครั้งหน้า")
     return result
 
 
@@ -1219,6 +1289,7 @@ input[type=text]::placeholder{color:#bbb}
 <button class="back" id="backBtn" onclick="showList()">← กลับไปรายชื่อทั้งหมด</button>
 
 <div class="status" id="status"></div>
+<div id="detailInfoNote" style="max-width:1400px;margin:-8px auto 10px;font-size:13px;color:#a99bc0"></div>
 
 <div id="listView">
   <div class="card">
@@ -1296,6 +1367,8 @@ function showList(){
   document.getElementById('detailView').style.display='none'
   document.getElementById('listView').style.display='block'
   document.getElementById('backBtn').style.display='none'
+  document.getElementById('detailInfoNote').textContent=''
+  _detailUid=0 // ชื่อ/รูปที่โหลดค้างอยู่ของคนเดิมจะไม่เขียนทับ
   history.replaceState(null,'','#')
 }
 
@@ -1517,7 +1590,34 @@ async function openDetail(uid,name){
       document.querySelectorAll('#detailView .qrow .qbtn').forEach(b=>b.classList.remove('active'))
     }
     renderDetail()
+    loadDetailInfo(uid)
   }catch(e){status.className='status err';status.textContent='เกิดข้อผิดพลาด: '+e.message}
+}
+
+// เติมชื่อ/ผู้สร้าง/รูปทีหลัง (ตารางขึ้นก่อนทันที) -- ราคาไม่แตะ ใช้ราคาที่จ่ายจริง e.p จาก log เสมอ
+async function loadDetailInfo(uid){
+  const unique=[...new Map(_detailItems.map(e=>[`${e.tp}_${e.id}`,{id:e.id,tp:e.tp}])).values()]
+  if(!unique.length)return
+  const note=document.getElementById('detailInfoNote')
+  if(note)note.textContent='กำลังโหลดชื่อและรูปไอเทม...'
+  try{
+    const r=await fetch('/api/item-details',{method:'POST',headers:{'Content-Type':'application/json','X-View-Token':TOKEN},body:JSON.stringify(unique)})
+    if(!r.ok)throw new Error(r.status)
+    const map=await r.json()
+    if(uid!==_detailUid)return // เปลี่ยนไปดูคนอื่นแล้ว
+    _detailItems.forEach(e=>{
+      const d=map[`${e.tp}_${e.id}`]
+      if(!d)return
+      e.nm=d.name||e.nm||''
+      e.cr=d.creator||''
+      e.thumb=d.thumb||''
+    })
+    renderDetail()
+  }catch(err){
+    if(uid===_detailUid&&note)note.textContent='โหลดชื่อ/รูปไอเทมไม่สำเร็จ ลองรีเฟรชหน้าอีกครั้ง'
+    return
+  }
+  if(uid===_detailUid&&note)note.textContent=''
 }
 
 // เปิดตรงเข้ารายละเอียดได้ถ้ามี #u=<userId> ติดมาใน URL (เผื่อแชร์ลิงก์เฉพาะคน)
@@ -1960,14 +2060,8 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(500, {"message": "DataStore error"}); return
             for e in entries:
                 e["earns"] = False if uid == OWNER_ID else entry_earns_commission(e)
-            # เติมชื่อ/ผู้สร้าง/thumbnail ให้ครบ (cache รายชิ้นอยู่แล้วใน fetch_item_details)
-            details = fetch_item_details(entries) if entries else {}
-            for e in entries:
-                d = details.get(f"{e['tp']}_{e['id']}")
-                if d:
-                    e["nm"]    = d.get("name") or e.get("nm") or ""
-                    e["cr"]    = d.get("creator", "")
-                    e["thumb"] = d.get("thumb", "")
+            # (2026-11-03) ไม่เติมชื่อ/ผู้สร้าง/รูปตรงนี้แล้ว -- เดิมต้องรอครบทุกชิ้นก่อนตอบ (คนซื้อ 100+ ชิ้นรอ 1 นาที)
+            # หน้าเว็บแสดงตารางทันที แล้วไปเติมชื่อ/รูปต่อผ่าน /api/item-details เหมือนหน้าอื่น
             cutoff = load_cutoffs().get(str(uid))
             self._json(200, {"entries": entries, "cutoffDate": cutoff})
         except Exception as e:

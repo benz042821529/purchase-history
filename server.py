@@ -549,8 +549,15 @@ COMMISSION_MIN_PRICE = 5
 # เจ้าของแมพ (AdminConfig.OWNER_ID ฝั่งเกม) -- ของที่เจ้าของซื้อเองไม่นับเข้าค่าคอมเลย (เหมือน COMMISSION_EXCLUDED_IDS ใน PurchaseHistoryPanel.lua)
 OWNER_ID = 8486039661
 # ค่าคอมจริงที่จ่าย = 40% ของยอดที่เข้าเกณฑ์ (commissionBase คือยอด "ฐาน" ก่อนคูณเปอร์เซ็นต์ ไม่ใช่ยอดจ่ายจริง -- ยังไม่เคยคูณใน Studio เลย ทำตรงนี้ที่เดียว)
-# 40% นี้แบ่งเป็น 2 ส่วนเท่ากัน: คนซื้อได้ 20% (buyerPay) + เจ้าของแมพได้ 20% (ownerPay) -- หารจาก commissionPay ที่ปัดแล้ว ไม่ใช่คำนวณ 20% แยก 2 รอบ กันผลรวมคลาดเคลื่อนจากการปัดเศษซ้ำ
+# 40% นี้แบ่งเป็น 2 ส่วน: คนซื้อได้ BUYER_RATE (buyerPay) + เจ้าของแมพได้ส่วนที่เหลือ (ownerPay) -- คิดจาก commissionPay ที่ปัดแล้ว ไม่ใช่คำนวณแยก 2 รอบ กันผลรวมคลาดเคลื่อนจากการปัดเศษซ้ำ
+# (2026-11-10) คนซื้อ 20% -> 25% / เจ้าของแมพ 20% -> 15% -- ต้องตรงกับ ReplicatedStorage.PurchaseRates ฝั่งเกม
 COMMISSION_RATE = 0.40
+BUYER_RATE = 0.25
+OWNER_RATE = COMMISSION_RATE - BUYER_RATE
+
+def buyer_share(commission_pay):
+    """ส่วนของคนซื้อจากค่าคอม 40% ที่ปัดแล้ว (= BUYER_RATE ของยอดฐาน)"""
+    return round(commission_pay * BUYER_RATE / COMMISSION_RATE, 2)
 
 def entry_earns_commission(e):
     # ของราคา 5 โรพอดีหรือต่ำกว่าไม่นับ (ตรงกับ entryEarnsCommission ฝั่งเกมที่ใช้ <= COMMISSION_MIN_PRICE)
@@ -603,7 +610,7 @@ def fetch_commission_data():
         # ของเจ้าของแมพเองไม่นับค่าคอม -- commissionBase ที่เก็บใน index มาจากฝั่งเกม (ยังไม่ได้กันเจ้าของไว้ตรงนั้น) เลยต้องกันตรงนี้แทน totalSpent/purchaseCount ยังโชว์จริงตามปกติ แค่ค่าคอมเป็น 0
         base = 0 if b.get("userId") == OWNER_ID else (b.get("commissionBase") or 0)
         b["commissionPay"] = round(base * COMMISSION_RATE, 2)
-        b["buyerPay"] = round(b["commissionPay"] / 2, 2)
+        b["buyerPay"] = buyer_share(b["commissionPay"])
         b["ownerPay"] = round(b["commissionPay"] - b["buyerPay"], 2)
 
     cache_set(ck, data)
@@ -633,7 +640,7 @@ def fetch_commission_data_ranged(from_ts, to_ts):
     for b in data:
         b["avatar"] = avatars.get(b["userId"], "")
         b["commissionPay"] = round((b.get("commissionBase") or 0) * COMMISSION_RATE, 2)
-        b["buyerPay"] = round(b["commissionPay"] / 2, 2)
+        b["buyerPay"] = buyer_share(b["commissionPay"])
         b["ownerPay"] = round(b["commissionPay"] - b["buyerPay"], 2)
 
     return data
@@ -683,7 +690,7 @@ def fetch_inspect_log():
 
 
 def add_outstanding_commission(buyers, cutoffs):
-    """ค่าคอมส่วนลูกค้า 20% ที่ยังค้างจ่าย = ครึ่งหนึ่งของค่าคอม 40% จากยอดที่ซื้อหลังวันตัดยอด (หลังเที่ยงคืนของวันนั้น เวลาไทย) จนถึงตอนนี้
+    """ค่าคอมส่วนลูกค้า (BUYER_RATE) ที่ยังค้างจ่าย = ส่วนของคนซื้อจากค่าคอม 40% จากยอดที่ซื้อหลังวันตัดยอด (หลังเที่ยงคืนของวันนั้น เวลาไทย) จนถึงตอนนี้
     คนที่ตัดยอดถึงวันซื้อล่าสุดแล้วได้ 0 ไม่ต้องดึง log; ไม่มีวันตัดยอดเลย = ค้างทั้งหมด"""
     tz = datetime.timezone(datetime.timedelta(hours=7))
     todo = {}
@@ -717,8 +724,8 @@ def add_outstanding_commission(buyers, cutoffs):
             b["outstandingPay"] = None  # ดึง log ไม่สำเร็จ
             continue
         base = sum((e.get("p") or 0) for e in entries if entry_earns_commission(e))
-        # หารครึ่งจาก 40% ที่ปัดแล้ว แบบเดียวกับ buyerPay กันผลรวมคลาดจากการปัดเศษซ้ำ
-        b["outstandingPay"] = round(round(base * COMMISSION_RATE, 2) / 2, 2)
+        # คิดจาก 40% ที่ปัดแล้ว แบบเดียวกับ buyerPay กันผลรวมคลาดจากการปัดเศษซ้ำ
+        b["outstandingPay"] = buyer_share(round(base * COMMISSION_RATE, 2))
 
 
 HTML = """<!DOCTYPE html>
@@ -1309,13 +1316,13 @@ input[type=text]::placeholder{color:#bbb}
   </div>
   <div class="stats" id="listStats" style="display:none">
     <div class="stat"><div class="val" id="sPeople">0</div><div class="lbl">คนที่ซื้อ</div></div>
-    <div class="stat"><div class="val" id="sBuyerTotal">0</div><div class="lbl">คนซื้อได้รวม 20% (Robux)</div></div>
+    <div class="stat"><div class="val" id="sBuyerTotal">0</div><div class="lbl">คนซื้อได้รวม 25% (Robux)</div></div>
     <div class="stat"><div class="val" id="sCommTotal">0</div><div class="lbl">ค่าคอมรวม 40% (Robux)</div></div>
     <div class="stat"><div class="val" id="sSpentTotal">0</div><div class="lbl">ยอดซื้อรวมทั้งหมด (ไม่หักค่าคอม)</div></div>
   </div>
   <div class="tbl-wrap">
     <table id="listTbl" style="display:none">
-      <thead><tr><th>#</th><th style="width:52px"></th><th>ผู้เล่น</th><th>ยอดซื้อรวม</th><th>ฐานค่าคอม</th><th>คนซื้อได้ 20%</th><th>ค้างจ่ายลูกค้า 20%<br><span style="text-transform:none">(หลังวันตัดยอด → วันนี้)</span></th><th>รวม 40%</th><th>จำนวนครั้ง</th><th>ซื้อล่าสุด</th><th>ตัดยอดล่าสุด</th></tr></thead>
+      <thead><tr><th>#</th><th style="width:52px"></th><th>ผู้เล่น</th><th>ยอดซื้อรวม</th><th>ฐานค่าคอม</th><th>คนซื้อได้ 25%</th><th>ค้างจ่ายลูกค้า 25%<br><span style="text-transform:none">(หลังวันตัดยอด → วันนี้)</span></th><th>รวม 40%</th><th>จำนวนครั้ง</th><th>ซื้อล่าสุด</th><th>ตัดยอดล่าสุด</th></tr></thead>
       <tbody id="listBody"></tbody>
     </table>
   </div>
@@ -1343,8 +1350,8 @@ input[type=text]::placeholder{color:#bbb}
     <div class="stat"><div class="val" id="dBundles">0</div><div class="lbl">Bundle</div></div>
     <div class="stat"><div class="val" id="dSpent">0</div><div class="lbl">ยอดซื้อรวม</div></div>
     <div class="stat"><div class="val" id="dCommBase">0</div><div class="lbl">ฐานค่าคอม</div></div>
-    <div class="stat"><div class="val" id="dBuyerPay">0</div><div class="lbl">คนซื้อได้ 20%</div></div>
-    <div class="stat"><div class="val" id="dOwnerPay">0</div><div class="lbl">เจ้าของแมพได้ 20%</div></div>
+    <div class="stat"><div class="val" id="dBuyerPay">0</div><div class="lbl">คนซื้อได้ 25%</div></div>
+    <div class="stat"><div class="val" id="dOwnerPay">0</div><div class="lbl">เจ้าของแมพได้ 15%</div></div>
     <div class="stat"><div class="val" id="dCommTotal">0</div><div class="lbl">รวมค่าคอม 40%</div></div>
   </div>
   <div class="tbl-wrap">
@@ -1373,10 +1380,11 @@ function showList(){
 }
 
 const BLANK_PX="data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7"
-const COMMISSION_RATE=0.40
+const COMMISSION_RATE=__COMMISSION_RATE__
+const BUYER_RATE=__BUYER_RATE__
 function fmtR(n){return 'R$ '+(n||0).toLocaleString(undefined,{maximumFractionDigits:2})}
-// แบ่งค่าคอม 40% (ที่คำนวณแล้ว) ออกเป็น 2 ส่วนเท่าๆ -- หารจากยอดที่ได้แล้ว ไม่คำนวณ 20% แยก 2 รอบ (กันคลาดเคลื่อนจากการปัดเศษซ้ำ)
-function splitComm(total){const buyer=Math.round((total/2)*100)/100;return{buyer,owner:Math.round((total-buyer)*100)/100}}
+// แบ่งค่าคอม 40% (ที่คำนวณแล้ว) เป็น คนซื้อ BUYER_RATE / เจ้าของแมพ ส่วนที่เหลือ -- คิดจากยอดที่ได้แล้ว ไม่คำนวณแยก 2 รอบ (กันคลาดเคลื่อนจากการปัดเศษซ้ำ)
+function splitComm(total){const buyer=Math.round((total*BUYER_RATE/COMMISSION_RATE)*100)/100;return{buyer,owner:Math.round((total-buyer)*100)/100}}
 let _listRows=[]
 
 function filterListByName(){
@@ -1476,7 +1484,7 @@ async function loadList(){
     if(!res.ok){status.className='status err';status.textContent='Error: '+(data.message||res.status);return}
     const rows=data.buyers||[]
     document.querySelector('#listStats .lbl').textContent=data.ranged?'คนที่ซื้อในช่วงนี้':'คนที่เคยซื้อ'
-    document.querySelectorAll('#listStats .lbl')[1].textContent=(data.ranged?'คนซื้อได้รวม 20% ในช่วงนี้':'คนซื้อได้รวม 20% ทั้งหมด')+' (Robux)'
+    document.querySelectorAll('#listStats .lbl')[1].textContent=(data.ranged?'คนซื้อได้รวม 25% ในช่วงนี้':'คนซื้อได้รวม 25% ทั้งหมด')+' (Robux)'
     document.querySelectorAll('#listStats .lbl')[2].textContent=(data.ranged?'ค่าคอมรวม 40% ในช่วงนี้':'ค่าคอมรวม 40% ทั้งหมด')+' (Robux)'
     document.querySelectorAll('#listStats .lbl')[3].textContent=(data.ranged?'ยอดซื้อรวมในช่วงนี้':'ยอดซื้อรวมทั้งหมด')+' (ไม่หักค่าคอม)'
     if(!rows.length){status.className='status';status.textContent=data.ranged?'ไม่มีใครซื้อในช่วงวันที่นี้':'ยังไม่มีข้อมูลการซื้อ';return}
@@ -1915,7 +1923,9 @@ class Handler(BaseHTTPRequestHandler):
                 self._json(500, {"message": str(e)})
             return
         if parsed.path.startswith("/commission/") and token_ok(parsed.path[len("/commission/"):]):
-            b = COMMISSION_HTML.replace("__VIEW_TOKEN__", VIEW_TOKEN).encode()
+            b = (COMMISSION_HTML.replace("__VIEW_TOKEN__", VIEW_TOKEN)
+                 .replace("__COMMISSION_RATE__", repr(COMMISSION_RATE))
+                 .replace("__BUYER_RATE__", repr(BUYER_RATE))).encode()
             self.send_response(200)
             self.send_header("Content-Type", "text/html;charset=utf-8")
             self.send_header("Content-Length", str(len(b)))

@@ -728,6 +728,116 @@ def add_outstanding_commission(buyers, cutoffs):
         b["outstandingPay"] = buyer_share(round(base * COMMISSION_RATE, 2))
 
 
+# ชื่อที่ index ในเกมไม่มี displayName (คนซื้อก่อน 17 ส.ค.) / เปลี่ยนชื่อไปแล้ว -- ใช้ค่าเดียวกับในไฟล์ ตัดยอดค่าคอม.numbers เดิม
+SHEET_NAME_OVERRIDES = {
+    10869734370: "NNEnter", 8950252430: "ONEMEEN", 9675242101: "BOVI", 2528205089: "aungdeknarak",
+    7123181899: "SODA", 8925412419: "LOGAN_TADUKExHK999", 8965030687: "SDC_Lukpla", 9240613140: "Mumuu",
+}
+SHEET_USERNAME_OVERRIDES = {9675242101: "bovi_na"}
+
+
+def commission_sheet_rows():
+    """แถวสำหรับไฟล์ดาวน์โหลด: [ชื่อ, username, userId, วันตัดยอด, วันซื้อล่าสุด (เวลาไทย), ค้างจ่าย] เรียงตามวันตัดยอด แล้ววันซื้อล่าสุด ใหม่ → เก่า"""
+    tz = datetime.timezone(datetime.timedelta(hours=7))
+    buyers = [dict(b) for b in fetch_commission_data()]
+    cutoffs = load_cutoffs()
+    for b in buyers:
+        b["cutoffDate"] = cutoffs.get(str(b.get("userId")))
+        b["lastTsAll"] = b.get("lastTs") or 0
+    add_outstanding_commission(buyers, cutoffs)
+    rows = []
+    for b in buyers:
+        uid = b.get("userId")
+        ts = b.get("lastTsAll")
+        rows.append([
+            b.get("displayName") or SHEET_NAME_OVERRIDES.get(uid) or b.get("username") or str(uid),
+            SHEET_USERNAME_OVERRIDES.get(uid) or b.get("username") or "",
+            str(uid),
+            b.get("cutoffDate") or "",
+            datetime.datetime.fromtimestamp(ts, tz).strftime("%Y-%m-%d") if ts else "",
+            b.get("outstandingPay"),
+        ])
+    rows.sort(key=lambda r: (r[3], r[4]), reverse=True)
+    return rows
+
+
+def build_xlsx(headers, rows, sheet_name):
+    """สร้างไฟล์ .xlsx ขั้นต่ำด้วย zipfile (ไม่ต้องลง library) -- คอลัมน์ที่เป็น 'YYYY-MM-DD' กลายเป็นวันที่จริง, ตัวเลขเป็นตัวเลข, ที่เหลือเป็นข้อความ"""
+    import io, zipfile, re
+    from xml.sax.saxutils import escape
+    epoch = datetime.date(1899, 12, 30)
+    def col(i):
+        s = ""
+        i += 1
+        while i:
+            i, r = divmod(i - 1, 26)
+            s = chr(65 + r) + s
+        return s
+    def cell(ref, v, header=False):
+        if header:
+            return f'<c r="{ref}" t="inlineStr" s="2"><is><t>{escape(str(v))}</t></is></c>'
+        if v is None or v == "":
+            return ""
+        if isinstance(v, (int, float)) and not isinstance(v, bool):
+            return f'<c r="{ref}"><v>{v}</v></c>'
+        if re.fullmatch(r"\d{4}-\d{2}-\d{2}", v):
+            serial = (datetime.date.fromisoformat(v) - epoch).days
+            return f'<c r="{ref}" s="1"><v>{serial}</v></c>'
+        return f'<c r="{ref}" t="inlineStr"><is><t>{escape(v)}</t></is></c>'
+    xml_rows = ['<row r="1">' + "".join(cell(f"{col(i)}1", h, True) for i, h in enumerate(headers)) + "</row>"]
+    for n, r in enumerate(rows, 2):
+        xml_rows.append(f'<row r="{n}">' + "".join(cell(f"{col(i)}{n}", v) for i, v in enumerate(r)) + "</row>")
+    widths = [24, 24, 16, 18, 18, 22]
+    cols = "".join(f'<col min="{i+1}" max="{i+1}" width="{w}" customWidth="1"/>' for i, w in enumerate(widths[:len(headers)]))
+    sheet = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+             '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+             '<sheetViews><sheetView workbookViewId="0"><pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/></sheetView></sheetViews>'
+             f'<cols>{cols}</cols><sheetData>{"".join(xml_rows)}</sheetData></worksheet>')
+    styles = ('<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+              '<styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+              '<numFmts count="1"><numFmt numFmtId="164" formatCode="dd/mm/yyyy"/></numFmts>'
+              '<fonts count="2"><font><sz val="12"/><name val="Calibri"/></font><font><b/><sz val="12"/><name val="Calibri"/></font></fonts>'
+              '<fills count="2"><fill><patternFill patternType="none"/></fill><fill><patternFill patternType="gray125"/></fill></fills>'
+              '<borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>'
+              '<cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>'
+              '<cellXfs count="3"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/>'
+              '<xf numFmtId="164" fontId="0" fillId="0" borderId="0" xfId="0" applyNumberFormat="1"/>'
+              '<xf numFmtId="0" fontId="1" fillId="0" borderId="0" xfId="0" applyFont="1"/></cellXfs>'
+              '</styleSheet>')
+    files = {
+        "[Content_Types].xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="xml" ContentType="application/xml"/>'
+            '<Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>'
+            '<Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>'
+            '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>'
+            '</Types>',
+        "_rels/.rels": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>'
+            '</Relationships>',
+        "xl/workbook.xml": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+            f'<sheets><sheet name="{escape(sheet_name)}" sheetId="1" r:id="rId1"/></sheets></workbook>',
+        "xl/_rels/workbook.xml.rels": '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>'
+            '<Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>'
+            '</Relationships>',
+        "xl/worksheets/sheet1.xml": sheet,
+        "xl/styles.xml": styles,
+    }
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for name, data in files.items():
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+SHEET_HEADERS = ["ชื่อ", "ไอดี (username)", "รหัสไอดี", "วันที่ตัดยอดล่าสุด", "วันที่ซื้อล่าสุด", "ค่าคอมค้างจ่าย (Robux)"]
+
+
 HTML = """<!DOCTYPE html>
 <html lang="th">
 <head>
@@ -1312,6 +1422,7 @@ input[type=text]::placeholder{color:#bbb}
     </div>
     <div class="date-row" style="margin-top:10px">
       <div class="fg" style="flex:1;min-width:200px"><label>ค้นหาชื่อ / User ID</label><input type="text" id="nameSearch" placeholder="พิมพ์ชื่อหรือ User ID..." oninput="filterListByName()"></div>
+      <div class="qrow" style="align-self:flex-end"><button class="qbtn" id="xlsxBtn" onclick="downloadSheet()">⬇️ ดาวน์โหลดไฟล์ตัดยอด (.xlsx)</button></div>
     </div>
   </div>
   <div class="stats" id="listStats" style="display:none">
@@ -1465,6 +1576,25 @@ function listQuickFilter(days){
     document.getElementById('listToDate').value=toISO(Math.floor(now.getTime()/1000))
   }
   loadList()
+}
+
+async function downloadSheet(){
+  const btn=document.getElementById('xlsxBtn')
+  const label=btn.textContent
+  btn.disabled=true;btn.textContent='กำลังสร้างไฟล์...'
+  try{
+    const res=await fetch('/api/commission-xlsx?token='+encodeURIComponent(TOKEN))
+    if(!res.ok){let m=res.status;try{m=(await res.json()).message||m}catch(_){};throw new Error(m)}
+    const blob=await res.blob()
+    const d=new Date(),pad=n=>String(n).padStart(2,'0')
+    const a=document.createElement('a')
+    a.href=URL.createObjectURL(blob)
+    a.download='ตัดยอดค่าคอม_'+d.getFullYear()+'-'+pad(d.getMonth()+1)+'-'+pad(d.getDate())+'.xlsx'
+    document.body.appendChild(a);a.click();a.remove()
+    setTimeout(()=>URL.revokeObjectURL(a.href),5000)
+  }catch(e){
+    const s=document.getElementById('status');s.className='status err';s.textContent='ดาวน์โหลดไม่สำเร็จ: '+e.message
+  }finally{btn.disabled=false;btn.textContent=label}
 }
 
 async function loadList(){
@@ -1993,6 +2123,24 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 print(f"[commission error] {e}")
                 self._json(500, {"message": str(e)})
+        elif parsed.path == "/api/commission-xlsx":
+            p     = urllib.parse.parse_qs(parsed.query)
+            token = (p.get("token") or [""])[0]
+            if not (self._check_auth() or self._check_view() or token_ok(token)):
+                self._json(401, {"message": "Unauthorized"}); return
+            try:
+                data = build_xlsx(SHEET_HEADERS, commission_sheet_rows(), "ตัดยอดค่าคอม")
+            except Exception as e:
+                print(f"[commission-xlsx error] {e}")
+                self._json(500, {"message": str(e)}); return
+            today = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=7))).strftime("%Y-%m-%d")
+            fname = urllib.parse.quote(f"ตัดยอดค่าคอม_{today}.xlsx")
+            self.send_response(200)
+            self.send_header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+            self.send_header("Content-Disposition", f"attachment; filename=\"commission_{today}.xlsx\"; filename*=UTF-8''{fname}")
+            self.send_header("Content-Length", str(len(data)))
+            self.end_headers()
+            self.wfile.write(data)
         elif parsed.path == "/api/commission-detail":
             p     = urllib.parse.parse_qs(parsed.query)
             token = (p.get("token") or [""])[0]

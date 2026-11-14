@@ -264,20 +264,60 @@ def _thumb_batch(ids, kind):
     return out
 
 
+AVATAR_TTL      = 6 * 3600   # จำรูปโปรไฟล์ผู้เล่นที่ได้แล้ว
+AVATAR_MISS_TTL = 60         # ดึงไม่ได้ (429/503/Pending) จำไว้แค่ 1 นาที แล้วค่อยลองใหม่
+
+
 def fetch_avatars(uids):
-    """ดึง avatar headshot ของผู้เล่นเป็นชุด -> {userId: imageUrl} เฉพาะที่ state=Completed"""
-    out = {}
+    """ดึง avatar headshot ของผู้เล่น -> {userId: imageUrl}
+    2026-11-14: เดิมไม่จำรูปเลย + โดน 429/503 ครั้งเดียวก็ได้ "" ทั้งชุด (แล้วถูก cache ทั้งตาราง 2 นาที) → รูปหายเกือบหมด
+    ตอนนี้: จำรายคน 6 ชม., ถามเฉพาะคนที่ยังไม่มี, โดน 429/5xx หรือรูปยัง Pending จะรอแล้วลองใหม่ (สูงสุด 3 รอบ)"""
+    out, need = {}, []
+    for u in dict.fromkeys(uids):
+        if not u:
+            continue
+        url = cache_get(("avatar", u), AVATAR_TTL)
+        if url:
+            out[u] = url
+        elif cache_get(("avatarmiss", u), AVATAR_MISS_TTL) is None:
+            need.append(u)
     base = "https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds={}&size=150x150&format=Png&isCircular=true"
-    for i in range(0, len(uids), 100):
-        chunk = ",".join(str(x) for x in uids[i:i + 100])
-        try:
-            d = roblox_public(base.format(chunk))
+    for attempt in range(3):
+        if not need:
+            break
+        if attempt:
+            time.sleep(1.5 * attempt)
+        retry = []
+        for i in range(0, len(need), 100):
+            chunk = need[i:i + 100]
+            try:
+                d = roblox_public(base.format(",".join(str(x) for x in chunk)))
+            except Exception as e:  # 429 / 5xx / timeout -> ลองชุดนี้ใหม่รอบหน้า
+                print(f"[avatars] attempt {attempt + 1}: {e}")
+                retry.extend(chunk)
+                continue
             for x in d.get("data", []):
-                if x.get("state") == "Completed" and x.get("imageUrl"):
-                    out[x["targetId"]] = x["imageUrl"]
-        except Exception as e:
-            print(f"[avatars] {e}")
+                uid, img = x.get("targetId"), x.get("imageUrl")
+                if x.get("state") == "Completed" and img:
+                    out[uid] = img
+                    cache_set(("avatar", uid), img)
+                elif x.get("state") == "Pending":
+                    retry.append(uid)
+                else:
+                    # Blocked/Error -> ไม่มีรูปจริง ไม่ต้องลองซ้ำ
+                    cache_set(("avatarmiss", uid), True)
+        need = retry
+    for u in need:
+        cache_set(("avatarmiss", u), True)
     return out
+
+
+def attach_avatars(rows):
+    """ใส่ b["avatar"] ให้ทุกแถว (ใช้ cache รายคน) -- เรียกทุกครั้งที่ส่งข้อมูล แม้ตารางจะมาจาก cache ก็ตาม คนที่รูปหายรอบก่อนจะถูกเติมให้"""
+    avatars = fetch_avatars([b.get("userId") for b in rows if b.get("userId")])
+    for b in rows:
+        b["avatar"] = avatars.get(b.get("userId"), "")
+    return rows
 
 
 # --- ดึงชื่อ/ผู้สร้าง/รูปไอเทม (2026-11-03: ปรับให้เร็วขึ้น) ---
@@ -573,7 +613,7 @@ def fetch_commission_data():
     ck = ("commission",)
     cached = cache_get(ck, 120)
     if cached is not None:
-        return cached
+        return attach_avatars(cached)
     try:
         data = roblox_get(
             f"{BASE}/standard-datastores/datastore/entries/entry",
@@ -588,9 +628,7 @@ def fetch_commission_data():
         data = []
     data.sort(key=lambda x: x.get("lastTs", 0), reverse=True)
 
-    avatars = fetch_avatars([b["userId"] for b in data if b.get("userId")])
-    for b in data:
-        b["avatar"] = avatars.get(b.get("userId"), "")
+    attach_avatars(data)
 
     # commissionBase ใน index สะสมมาตั้งแต่ก่อนเปลี่ยนเกณฑ์ (เดิมนับของราคา 5 โรด้วย) -- คำนวณฐานใหม่จาก log จริงทุกชิ้นด้วยเกณฑ์ปัจจุบันแทน
     # (อ่านอย่างเดียว ไม่เขียนกลับ Roblox) ถ้าดึง log ไม่สำเร็จค่อยถอยไปใช้ตัวเลขใน index
@@ -636,9 +674,8 @@ def fetch_commission_data_ranged(from_ts, to_ts):
     data = list(byUid.values())
     data.sort(key=lambda x: x.get("lastTs", 0), reverse=True)
 
-    avatars = fetch_avatars([b["userId"] for b in data])
+    attach_avatars(data)
     for b in data:
-        b["avatar"] = avatars.get(b["userId"], "")
         b["commissionPay"] = round((b.get("commissionBase") or 0) * COMMISSION_RATE, 2)
         b["buyerPay"] = buyer_share(b["commissionPay"])
         b["ownerPay"] = round(b["commissionPay"] - b["buyerPay"], 2)
@@ -1528,7 +1565,7 @@ function rowHtml(b,i){
     const buyerPay=b.buyerPay!=null?b.buyerPay:splitComm(pay).buyer
     return `<tr class="clickable${isSettled(b)?' settled':''}" onclick="openDetail(${b.userId},'${(name+'').replace(/'/g,"\\\\'")}')">
       <td class="rank">${i+1}</td>
-      <td><img class="thumb" src="${b.avatar||BLANK_PX}"></td>
+      <td><img class="thumb" src="${b.avatar||BLANK_PX}" onerror="this.onerror=null;this.src=BLANK_PX"></td>
       <td><div class="name-cell">${name}</div><div class="uid-cell">User ID ${b.userId}${b.username&&b.username!==name?' · @'+b.username:''}</div></td>
       <td class="money">${fmtR(b.totalSpent)}</td>
       <td>${fmtR(b.commissionBase)}</td>

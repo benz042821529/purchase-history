@@ -139,10 +139,28 @@ def cache_set(key, value):
         _cache[key] = (time.time(), value)
 
 def roblox_get(path, params=None):
+    """เรียก Open Cloud -- 2026-11-14: Roblox ตอบ 503/502/500/429 หรือ timeout ชั่วคราวบ่อย เลยลองใหม่ให้ (สูงสุด 4 ครั้ง รอ 0.5/1/2 วิ)
+    404 และ error อื่น (401/403) ส่งต่อทันที ไม่ลองซ้ำ"""
     url = path + ("?" + urllib.parse.urlencode(params) if params else "")
-    req = urllib.request.Request(url, headers={"x-api-key": API_KEY})
-    with urllib.request.urlopen(req, timeout=10) as r:
-        return json.loads(r.read().decode())
+    last_err = None
+    for attempt in range(4):
+        if attempt:
+            time.sleep(0.5 * (2 ** (attempt - 1)))
+        req = urllib.request.Request(url, headers={"x-api-key": API_KEY})
+        try:
+            with urllib.request.urlopen(req, timeout=10) as r:
+                return json.loads(r.read().decode())
+        except urllib.error.HTTPError as e:
+            if e.code in (429, 500, 502, 503, 504):
+                last_err = e
+                print(f"[roblox_get] HTTP {e.code} (attempt {attempt + 1}) {path.rsplit('/', 1)[-1]}")
+                continue
+            raise
+        except (urllib.error.URLError, TimeoutError, ConnectionError) as e:
+            last_err = e
+            print(f"[roblox_get] {e} (attempt {attempt + 1})")
+            continue
+    raise last_err
 
 def resolve_username(username):
     try:
@@ -546,11 +564,18 @@ def batch_usernames(uids):
     return result
 
 
-def fetch_all_history(from_ts=None, to_ts=None):
+class HistoryIncomplete(Exception):
+    """ดึง log บางคนไม่สำเร็จ (Roblox ล่มชั่วคราว) -- ข้อมูลไม่ครบ ห้ามเอาไปคิดค่าคอม"""
+    pass
+
+
+def fetch_all_history(from_ts=None, to_ts=None, strict=False):
+    """strict=True: ถ้ามีคนไหนดึง log ไม่สำเร็จ ให้ raise HistoryIncomplete แทนการคืนข้อมูลที่ขาดไป (ใช้ตอนคิดค่าคอม)"""
     ck = ("all", from_ts, to_ts)
     cached = cache_get(ck, 300)
     if cached is not None:
         return cached
+    failed = []
 
     keys = list_all_keys()
 
@@ -562,6 +587,9 @@ def fetch_all_history(from_ts=None, to_ts=None):
         except:
             return []
         entries = fetch_history(uid, from_ts, to_ts)
+        if entries is None:  # ดึงไม่สำเร็จ (ไม่ใช่ว่าไม่มีข้อมูล)
+            failed.append(uid)
+            return []
         if not entries:
             return []
         for e in entries:
@@ -580,6 +608,12 @@ def fetch_all_history(from_ts=None, to_ts=None):
         e["username"] = uid_names.get(e["uid"], str(e["uid"]))
 
     all_entries.sort(key=lambda x: x["ts"], reverse=True)
+    if failed:
+        # ไม่ cache ข้อมูลที่ไม่ครบ -- ครั้งหน้าจะดึงใหม่
+        print(f"[fetch_all_history] {len(failed)} player(s) failed to load: {failed[:10]}")
+        if strict:
+            raise HistoryIncomplete(f"โหลด log ไม่ครบ {len(failed)} คน")
+        return all_entries
     cache_set(ck, all_entries)
     return all_entries
 
@@ -615,6 +649,18 @@ def fetch_commission_data():
     if cached is not None:
         return attach_avatars(cached)
     try:
+        return _fetch_commission_data_fresh(ck)
+    except Exception as e:
+        # Roblox ล่มชั่วคราว -> ใช้ข้อมูลชุดล่าสุดที่โหลดสำเร็จแทน (ถ้ามี) ดีกว่าขึ้น error ทั้งหน้า
+        stale = cache_get(ck, 24 * 3600)
+        if stale is not None:
+            print(f"[commission] fresh fetch failed, serving last good data: {e}")
+            return attach_avatars(stale)
+        raise
+
+
+def _fetch_commission_data_fresh(ck):
+    try:
         data = roblox_get(
             f"{BASE}/standard-datastores/datastore/entries/entry",
             {"datastoreName": COMMISSION_DS_NAME, "entryKey": COMMISSION_KEY}
@@ -635,7 +681,7 @@ def fetch_commission_data():
     recomputed = None
     try:
         recomputed = {}
-        for e in fetch_all_history():
+        for e in fetch_all_history(strict=True):
             if entry_earns_commission(e):
                 recomputed[e["uid"]] = recomputed.get(e["uid"], 0) + (e.get("p") or 0)
     except Exception as err:
@@ -657,7 +703,7 @@ def fetch_commission_data():
 
 def fetch_commission_data_ranged(from_ts, to_ts):
     """สรุปยอดค่าคอมเฉพาะที่ซื้อในช่วงวันที่ที่กำหนด (ไล่สแกนทุก entry จริงในช่วงนั้น ไม่ใช่ยอดสะสมทั้งหมด)"""
-    entries = fetch_all_history(from_ts, to_ts)
+    entries = fetch_all_history(from_ts, to_ts, strict=True)
     byUid = {}
     for e in entries:
         uid = e["uid"]

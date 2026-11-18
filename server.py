@@ -99,6 +99,49 @@ def _read_cutoffs():
     _write_cutoffs(seed)
     return seed
 
+# ==================== (2026-11-18) ชุดสำเร็จ (Roblox "Looks") สำหรับร้านในเกม ====================
+# รายการเลขชุดต้องใช้การล็อกอิน Roblox ถึงจะดึงได้ → สคริปต์ Tampermonkey ในเบราว์เซอร์เจ้าของเกม
+# ดึงตอนเปิดหน้า /commission/... แล้วส่งมาที่ POST /api/looks?token=VIEW_TOKEN (เก็บใน gist ไฟล์ looks.json)
+# เกมอ่านที่ GET /api/looks (ข้อมูลสาธารณะ: แค่เลขชุด) แล้วไปถามรายละเอียดแต่ละชุดจาก Roblox เอง
+LOOKS_FILE = "looks.json"
+LOOKS_MAX  = 800
+_looks_lock  = threading.Lock()
+_looks_cache = None  # {"updated": ts, "ids": [...], "groups": {...}}
+
+def load_looks():
+    global _looks_cache
+    with _looks_lock:
+        if _looks_cache is None:
+            try:
+                f = (_gist_request("GET").get("files") or {}).get(LOOKS_FILE)
+                content = (f or {}).get("content", "").strip()
+                data = json.loads(content) if content else {}
+                _looks_cache = data if isinstance(data, dict) else {}
+            except Exception as e:
+                print(f"[load_looks] {e}")
+                return {"updated": 0, "ids": []}
+        return dict(_looks_cache)
+
+def save_looks(ids, groups, order=None):
+    global _looks_cache
+    data = {"updated": int(time.time()), "ids": ids, "groups": groups,
+            "order": [k for k in (order or []) if k in groups]}
+    content = json.dumps(data, ensure_ascii=False)
+    with _looks_lock:
+        _gist_request("PATCH", {"files": {LOOKS_FILE: {"content": content}}})
+        _looks_cache = data
+    return data
+
+def clean_look_ids(raw):
+    out, seen = [], set()
+    for x in raw if isinstance(raw, list) else []:
+        x = str(x).strip()
+        if x.isdigit() and 5 <= len(x) <= 25 and x not in seen:
+            seen.add(x); out.append(x)
+        if len(out) >= LOOKS_MAX:
+            break
+    return out
+
 def load_cutoffs():
     global _cutoff_cache
     with _cutoff_lock:
@@ -2103,11 +2146,38 @@ class Handler(BaseHTTPRequestHandler):
             except Exception as e:
                 print(f"[save_cutoff {uid}] {e}")
                 self._json(500, {"message": str(e)})
+        elif parsed.path == "/api/looks":
+            p     = urllib.parse.parse_qs(parsed.query)
+            token = (p.get("token") or [""])[0]
+            if not (self._check_view() or token_ok(token)):
+                self._json(401, {"message": "Unauthorized"}); return
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                if length > 200000:
+                    self._json(413, {"message": "too large"}); return
+                body   = json.loads(self.rfile.read(length).decode())
+                ids    = clean_look_ids(body.get("ids"))
+                groups = {}
+                for k, v in (body.get("groups") or {}).items():
+                    if isinstance(k, str) and len(k) <= 40:
+                        groups[k] = clean_look_ids(v)[:200]
+                if len(ids) < 5:
+                    self._json(400, {"message": "too few ids"}); return
+                order  = [k for k in (body.get("order") or []) if isinstance(k, str)][:40]
+                data = save_looks(ids, groups, order)
+                self._json(200, {"ok": True, "count": len(ids), "updated": data["updated"]})
+            except Exception as e:
+                print(f"[save_looks] {e}")
+                self._json(500, {"message": str(e)})
         else:
             self._json(404, {"message": "Not found"})
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path == "/api/looks":
+            # (2026-11-18) ให้เกมอ่านรายการเลขชุดสำเร็จ (สาธารณะ ไม่มีข้อมูลส่วนตัว)
+            self._json(200, load_looks())
+            return
         if parsed.path.startswith("/all/") and token_ok(parsed.path[5:]):
             b = ALL_HTML.replace("__VIEW_TOKEN__", VIEW_TOKEN).encode()
             self.send_response(200)

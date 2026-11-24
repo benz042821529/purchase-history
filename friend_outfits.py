@@ -535,7 +535,7 @@ def _sale_status(req):
     res, need = {}, []
     for r in req:
         key = f"{r['tp']}_{r['id']}"
-        c = _h["cache_get"](("fo", "sale", key), 600)
+        c = _h["cache_get"](("fo", "sale2", key), 600)
         if c is not None: res[key] = c
         else: need.append(r)
     cb = _h.get("catalog_batch")
@@ -553,15 +553,16 @@ def _sale_status(req):
             if not ci: continue
             restr = set(ci.get("itemRestrictions") or [])
             limited = bool(restr & _LIM)
+            legacy = bool(restr & {"Limited", "LimitedUnique"})  # ลิมิเต็ดยุคเก่า: Roblox ไม่ขายแล้ว ซื้อได้แค่ขายต่อ
             status = str(ci.get("priceStatus") or "")
             units = ci.get("unitsAvailableForConsumption")
-            off = bool(ci.get("isOffSale")) or status == "Off Sale" or (limited and units == 0)
+            off = legacy or bool(ci.get("isOffSale")) or status == "Off Sale" or (limited and units == 0)
             lowest = ci.get("lowestResalePrice") or ci.get("lowestPrice") or 0
             info = {"offsale": off, "limited": limited, "resale": 0}
-            if limited and off and ci.get("hasResellers") is not False and lowest:
+            if limited and off and lowest:
                 info["resale"] = int(lowest)
             res[key] = info
-            _h["cache_set"](("fo", "sale", key), info)
+            _h["cache_set"](("fo", "sale2", key), info)
     return res
 
 def merge_map(idx_items):
@@ -663,6 +664,11 @@ def handle_get(path, query):
         if path == "/api/fo/outfit":  return 200, outfit(num("id"))
         if path == "/api/fo/inv":     return 200, inventory(num("uid"), g("cat"), g("cursor"))
         if path == "/api/fo/invmeta": return 200, INV_META
+        if path == "/api/fo/rawsale":  # (2026-11-24) ไว้ตรวจราคา: ข้อมูลดิบจาก catalog ของไอเทมเดียว
+            iid = int(g("id") or 0); tp = "B" if g("tp") == "B" else "A"
+            cb = _h.get("catalog_batch")
+            ci = cb([(iid, tp)]).get((tp, iid)) if cb and iid else None
+            return 200, {"catalog": ci, "status": _sale_status([{"id": iid, "tp": tp}]).get(f"{tp}_{iid}")}
         if path == "/api/fo/thumbs":
             kind = g("kind")
             if kind not in THUMB_URL: raise FoError(400, "kind")

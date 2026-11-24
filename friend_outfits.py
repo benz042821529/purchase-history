@@ -285,18 +285,21 @@ PIECE_TYPES = {"Head", "Torso", "LeftArm", "RightArm", "LeftLeg", "RightLeg", "D
 BUNDLE_CAT = {"BodyParts": "body", "DynamicHead": "face", "DynamicHeadAvatar": "body", "Animations": "anim", "Shoes": "shoes"}
 
 def _bundles_of(aid):
-    def go():
-        try:
-            d = _req(f"https://catalog.roblox.com/v1/assets/{aid}/bundles?limit=10&sortOrder=Asc")
-        except Exception as e:
-            print(f"[fo bundles {aid}] {e}")
-            return []
-        out = []
-        for b in d.get("data", []):
-            ids = [it.get("id") for it in b.get("items", []) if it.get("type") == "Asset"]
-            out.append({"id": b.get("id"), "name": b.get("name", ""), "type": b.get("bundleType", ""), "items": ids})
-        return out
-    return _cached(("abundles", aid), 86400, go)
+    # (2026-11-24) ถาม Roblox ไม่สำเร็จ (โดนจำกัดความถี่) → ไม่จำผลว่างไว้ทั้งวัน ครั้งหน้าถามใหม่
+    c = _h["cache_get"](("fo", "abundles", aid), 86400)
+    if c is not None:
+        return c
+    try:
+        d = _req(f"https://catalog.roblox.com/v1/assets/{aid}/bundles?limit=10&sortOrder=Asc")
+    except Exception as e:
+        print(f"[fo bundles {aid}] {e}")
+        return []
+    out = []
+    for b in d.get("data", []):
+        ids = [it.get("id") for it in b.get("items", []) if it.get("type") == "Asset"]
+        out.append({"id": b.get("id"), "name": b.get("name", ""), "type": b.get("bundleType", ""), "items": ids})
+    _h["cache_set"](("fo", "abundles", aid), out)
+    return out
 
 def _norm(t):
     return "".join(ch for ch in (t or "").lower() if ch.isalnum())

@@ -18,9 +18,9 @@ MAP_DS_NAME = "PlayerOutfitCodes_v1"   # ตรงกับ SaveOutfitServer.CON
 # ฟังก์ชันจาก server.py (ตั้งผ่าน init กัน import วน)
 _h = {}
 
-def init(roblox_get, fetch_item_details, base, cache_get, cache_set):
+def init(roblox_get, fetch_item_details, base, cache_get, cache_set, catalog_batch=None):
     _h.update(roblox_get=roblox_get, fetch_item_details=fetch_item_details, base=base,
-              cache_get=cache_get, cache_set=cache_set)
+              cache_get=cache_get, cache_set=cache_set, catalog_batch=catalog_batch)
 
 # ---------------- จำกัดความถี่ต่อเครื่อง (กันคนยิงจน Roblox บล็อกเว็บ) ----------------
 _rl_lock = threading.Lock()
@@ -481,7 +481,59 @@ def items(ids):
         elif k.isdigit():
             req.append({"id": int(k), "tp": "A"}); back[k] = f"A_{k}"
     det = _h["fetch_item_details"](req)
-    return {k: det.get(v, {}) for k, v in back.items()}
+    out = {k: dict(det.get(v, {})) for k, v in back.items()}
+    # (2026-11-24) ราคาให้ตรงความจริง: ของลิมิเต็ด/ของที่เลิกขาย Roblox ยังส่ง "ราคาเดิม" มา
+    # → ลิมิเต็ดที่ซื้อจาก Roblox ไม่ได้แล้ว ใช้ราคาขายต่อถูกสุด (resale) · ของที่เลิกขาย = offsale
+    try:
+        st = _sale_status(req)
+        for k, v in back.items():
+            s2 = st.get(v)
+            if not s2: continue
+            d = out[k]
+            if s2.get("resale"):
+                d["price"] = s2["resale"]; d["resale"] = True
+            elif s2.get("offsale"):
+                d["offsale"] = True
+                if s2.get("limited"): d["price"] = 0
+    except Exception as e:
+        print(f"[fo sale status] {e}")
+    return out
+
+_LIM = {"Limited", "LimitedUnique", "Collectible"}
+
+def _sale_status(req):
+    """{ "A_id"|"B_id": {offsale, limited, resale} } จาก catalog (cache 10 นาที ต่อชิ้น)"""
+    res, need = {}, []
+    for r in req:
+        key = f"{r['tp']}_{r['id']}"
+        c = _h["cache_get"](("fo", "sale", key), 600)
+        if c is not None: res[key] = c
+        else: need.append(r)
+    cb = _h.get("catalog_batch")
+    if not need or not cb:
+        return res
+    for i in range(0, len(need), 40):
+        chunk = need[i:i + 40]
+        try:
+            found = cb([(r["id"], r["tp"]) for r in chunk])
+        except Exception as e:
+            print(f"[fo sale batch] {e}"); continue
+        for r in chunk:
+            key = f"{r['tp']}_{r['id']}"
+            ci = found.get((r["tp"], r["id"]))
+            if not ci: continue
+            restr = set(ci.get("itemRestrictions") or [])
+            limited = bool(restr & _LIM)
+            status = str(ci.get("priceStatus") or "")
+            units = ci.get("unitsAvailableForConsumption")
+            off = bool(ci.get("isOffSale")) or status == "Off Sale" or (limited and units == 0)
+            lowest = ci.get("lowestResalePrice") or ci.get("lowestPrice") or 0
+            info = {"offsale": off, "limited": limited, "resale": 0}
+            if limited and off and ci.get("hasResellers") is not False and lowest:
+                info["resale"] = int(lowest)
+            res[key] = info
+            _h["cache_set"](("fo", "sale", key), info)
+    return res
 
 def merge_map(idx_items):
     return merge_bundles(idx_items)
@@ -663,6 +715,7 @@ header h1 small{display:block;font-size:13px;font-weight:400;color:var(--sub);ma
 .item .th img{width:100%;height:100%;object-fit:contain}
 .item .n{font-size:12px;line-height:1.25;height:2.5em;overflow:hidden}
 .item .p,.rowi .p{font-size:12px;font-weight:500;color:var(--gold);white-space:nowrap}
+.item .p .rs{font-size:10px;font-weight:400;color:var(--sub)}
 .item .p.free{color:var(--green)}.item .p.off{color:var(--sub);font-weight:400}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--osz,130px),1fr));gap:8px}
 .of{background:var(--panel);border-radius:12px;padding:6px;cursor:pointer;border:1px solid transparent}
@@ -726,7 +779,7 @@ const T={
   items:'ชิ้น',total:'ราคารวมชิ้นที่ยังขาย',free:'ฟรี',off:'ไม่ขาย',profile:'โปรไฟล์ Roblox',showMore:'แสดงเพิ่ม',
   noRoblox:'ไม่มีชุดที่สร้างเก็บไว้ใน Roblox',priv:'🔒 เจ้าตัวปิดการดูไอเทม/ชุดไว้ ดูได้แค่ชุดที่ใส่อยู่',
   noMap:'ยังไม่เคยเซฟชุดในแมพ',inv:'ไอเทมทั้งหมด',invPriv:'🔒 เจ้าตัวปิดการดูคลังไอเทมไว้ เลยดูไอเทมทั้งหมดไม่ได้',invEmpty:'ไม่มีไอเทมในหมวดนี้',invHint:'ไอเทมที่อยู่ในคลังของคนนี้ เรียงจากที่ได้มาล่าสุด',invHid:'ซ่อนชิ้นส่วนที่อยู่ในชุดเซ็ตแล้ว',mapPerm:'ยังเปิดดูชุดในแมพไม่ได้ (ต้องเพิ่มสิทธิ์ API key ให้อ่าน DataStore PlayerOutfitCodes_v1)',
-  code:'โค้ด',saved:'เซฟเมื่อ',sDef:'ค่าเริ่มต้น',by:'โดย',sNew:'ล่าสุด',sPd:'ราคา ↓',sPa:'ราคา ↑',sNa:'ชื่อ ก-ฮ',sNz:'ชื่อ ฮ-ก',grp:'แยกหมวด',flat:'รวม',grid:'ตาราง',list:'รายการ',smaller:'เล็กลง',bigger:'ใหญ่ขึ้น',outfits:'ชุด',fail:'โหลดไม่สำเร็จ ลองใหม่อีกครั้ง',back:'ค้นหาใหม่',
+  code:'โค้ด',saved:'เซฟเมื่อ',sDef:'ค่าเริ่มต้น',by:'โดย',sNew:'ล่าสุด',sPd:'ราคา ↓',sPa:'ราคา ↑',sNa:'ชื่อ ก-ฮ',sNz:'ชื่อ ฮ-ก',grp:'แยกหมวด',resale:'ขายต่อ',resaleTip:'ลิมิเต็ด ซื้อจาก Roblox ไม่ได้แล้ว ราคานี้คือราคาขายต่อที่ถูกที่สุด',offsale:'ไม่วางขาย',flat:'รวม',grid:'ตาราง',list:'รายการ',smaller:'เล็กลง',bigger:'ใหญ่ขึ้น',outfits:'ชุด',fail:'โหลดไม่สำเร็จ ลองใหม่อีกครั้ง',back:'ค้นหาใหม่',
   foot:'ข้อมูลจาก Roblox (สาธารณะ) · ชุดที่เซฟในแมพ = ระบบบันทึกชุดในแมพ รวมมิจของtangsan',
   cats:{bundle:'ชุดเซ็ต (Bundle)',hair:'ผม',head:'หมวก / หัว',face:'หน้า',top:'เสื้อ',bottom:'กางเกง / กระโปรง',shoes:'รองเท้า',acc:'เครื่องประดับ',body:'ร่างกาย',anim:'ท่าเดิน / ท่าทาง',emote:'อีโมต',other:'อื่นๆ'}},
  en:{ttl:'👕 Roblox Outfit Viewer',sub:"Type an ID or username → see what they're wearing, their saved Roblox outfits and outfits saved in the map",ph:'ID / @username',go:'Search',
@@ -734,7 +787,7 @@ const T={
   items:'items',total:'Total for items still on sale',free:'Free',off:'Off sale',profile:'Roblox profile',showMore:'Show more',
   noRoblox:'No outfits saved on their Roblox account',priv:'🔒 This player hides their inventory — only the current outfit is visible',
   noMap:'No outfits saved in the map yet',inv:'All items',invPriv:'🔒 This player hides their inventory, so their items can\'t be shown',invEmpty:'No items in this category',invHint:'Items in this player\'s inventory, newest first',invHid:'pieces already shown under Bundles were hidden',mapPerm:'Map outfits not available yet (the API key needs read access to DataStore PlayerOutfitCodes_v1)',
-  code:'Code',saved:'Saved',sDef:'Default',by:'by',sNew:'Newest',sPd:'Price ↓',sPa:'Price ↑',sNa:'Name A-Z',sNz:'Name Z-A',grp:'By category',flat:'All together',grid:'Grid',list:'List',smaller:'Smaller',bigger:'Bigger',outfits:'outfits',fail:'Could not load — please try again',back:'New search',
+  code:'Code',saved:'Saved',sDef:'Default',by:'by',sNew:'Newest',sPd:'Price ↓',sPa:'Price ↑',sNa:'Name A-Z',sNz:'Name Z-A',grp:'By category',resale:'resale',resaleTip:'Limited — no longer sold by Roblox; lowest resale price',offsale:'Off sale',flat:'All together',grid:'Grid',list:'List',smaller:'Smaller',bigger:'Bigger',outfits:'outfits',fail:'Could not load — please try again',back:'New search',
   foot:'Data from Roblox (public) · Map outfits come from the outfit saver in รวมมิจของtangsan',
   cats:{bundle:'Bundles',hair:'Hair',head:'Hats / Head',face:'Face',top:'Tops',bottom:'Bottoms',shoes:'Shoes',acc:'Accessories',body:'Body',anim:'Animations',emote:'Emotes',other:'Other'}}
 };
@@ -808,6 +861,8 @@ async function api(path,opt){
 }
 function priceHtml(d){
   if(!d||!d.name&&!d.price) return '<div class="p off">…</div>';
+  if(d.resale&&d.price>0) return '<div class="p" title="'+esc(t('resaleTip'))+'">R$ '+(d.price>=100000?(d.price>=1e6?(d.price/1e6).toFixed(d.price>=1e7?0:1)+'M':Math.round(d.price/1e3)+'K'):d.price.toLocaleString())+' <span class="rs">'+esc(t('resale'))+'</span></div>';
+  if(d.offsale) return '<div class="p off">'+esc(t('offsale'))+'</div>';
   if(d.price>0) return '<div class="p">R$ '+d.price.toLocaleString()+'</div>';
   return '<div class="p off">—</div>';
 }
@@ -842,7 +897,7 @@ function itemsHtml(items){
   return wrap==='items'?'<div class="cats">'+h+'</div>':h;
 }
 function totalHtml(items){
-  let sum=0;items.forEach(it=>{const d=itemCache[kOf(it)];if(d&&d.price>0)sum+=d.price});
+  let sum=0;items.forEach(it=>{const d=itemCache[kOf(it)];if(d&&d.price>0&&!d.resale&&!d.offsale)sum+=d.price});
   return '<div class="total">'+items.length+' '+t('items')+(sum?' · '+t('total')+' <b>R$ '+sum.toLocaleString()+'</b>':'')+'</div>';
 }
 

@@ -2110,7 +2110,7 @@ window.addEventListener('DOMContentLoaded',load)
 import friend_outfits as FO
 import news as NEWS  # (2026-11-24) ข่าว Roblox ให้แมพ: GET /api/news
 FO.init(roblox_get=roblox_get, fetch_item_details=fetch_item_details, base=BASE,
-        cache_get=cache_get, cache_set=cache_set)
+        cache_get=cache_get, cache_set=cache_set, catalog_batch=catalog_items_batch)
 
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):

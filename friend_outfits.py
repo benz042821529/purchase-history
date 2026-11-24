@@ -425,6 +425,55 @@ def items(ids):
 def merge_map(idx_items):
     return merge_bundles(idx_items)
 
+# ---------------- (2026-11-24) ไอเทมทั้งหมดที่ผู้เล่นมี (คลัง) แยกหมวด ----------------
+# GET /api/fo/inv?uid=&cat=&cursor=  → { items, next, private }  ทีละ 100 ชิ้น · คลังส่วนตัว = private: true
+INV_TYPES = {
+    "hair":   ["HairAccessory"],
+    "head":   ["Hat"],
+    "face":   ["Face", "FaceAccessory", "EyebrowAccessory", "EyelashAccessory"],
+    "top":    ["Shirt", "TShirt", "TShirtAccessory", "ShirtAccessory", "JacketAccessory", "SweaterAccessory"],
+    "bottom": ["Pants", "PantsAccessory", "ShortsAccessory", "DressSkirtAccessory"],
+    "shoes":  ["LeftShoeAccessory", "RightShoeAccessory"],
+    "acc":    ["NeckAccessory", "ShoulderAccessory", "FrontAccessory", "BackAccessory", "WaistAccessory", "Gear"],
+    "body":   ["DynamicHead", "Head", "Torso", "LeftArm", "RightArm", "LeftLeg", "RightLeg"],
+    "anim":   ["IdleAnimation", "WalkAnimation", "RunAnimation", "JumpAnimation", "FallAnimation", "ClimbAnimation",
+               "SwimAnimation", "MoodAnimation"],
+    "emote":  ["EmoteAnimation"],
+}
+INV_CATS = ["bundle", "hair", "head", "face", "top", "bottom", "shoes", "acc", "emote", "anim", "body"]
+
+def _inv_assets(uid, types, cursor):
+    q = {"assetTypes": ",".join(types), "limit": 100, "sortOrder": "Desc"}
+    if cursor: q["cursor"] = cursor
+    d = _req(f"https://inventory.roblox.com/v2/users/{uid}/inventory?" + urllib.parse.urlencode(q))
+    items = []
+    for a in d.get("data") or []:
+        aid = a.get("assetId")
+        if aid:
+            items.append(_item(aid, a.get("assetType") or "", a.get("name") or a.get("assetName") or ""))
+    return items, d.get("nextPageCursor")
+
+def inventory(uid, cat, cursor):
+    if cat not in INV_CATS:
+        raise FoError(400, "หมวดไม่ถูกต้อง")
+    cursor = (cursor or "")[:600]
+    def go():
+        try:
+            if cat == "bundle":
+                q = {"limit": 100, "sortOrder": "Desc"}
+                if cursor: q["cursor"] = cursor
+                d = _req(f"https://catalog.roblox.com/v1/users/{uid}/bundles?" + urllib.parse.urlencode(q))
+                items = [{"id": b["id"], "key": "b" + str(b["id"]), "bundle": True, "type": b.get("bundleType", ""),
+                          "cat": "bundle", "name": b.get("name", "")} for b in d.get("data") or [] if b.get("id")]
+                return {"items": items, "next": d.get("nextPageCursor"), "private": False}
+            items, nxt = _inv_assets(uid, INV_TYPES[cat], cursor)
+            return {"items": items, "next": nxt, "private": False}
+        except urllib.error.HTTPError as e:
+            if e.code in (401, 403):
+                return {"items": [], "next": None, "private": True}
+            raise
+    return _cached(("inv", uid, cat, cursor), 300, go)
+
 # ---------------- เส้นทาง ----------------
 def handle_get(path, query):
     """คืน (status, dict) หรือ None ถ้าไม่ใช่เส้นทางของหน้านี้"""
@@ -440,6 +489,7 @@ def handle_get(path, query):
         if path == "/api/fo/friends": return 200, friends(num("uid"))
         if path == "/api/fo/person":  return 200, person(num("uid"))
         if path == "/api/fo/outfit":  return 200, outfit(num("id"))
+        if path == "/api/fo/inv":     return 200, inventory(num("uid"), g("cat"), g("cursor"))
         if path == "/api/fo/thumbs":
             kind = g("kind")
             if kind not in THUMB_URL: raise FoError(400, "kind")
@@ -576,7 +626,7 @@ const T={
   loading:'กำลังโหลด...',pick:'เจอหลายคน เลือกคนที่ใช่',wearing:'ใส่อยู่ตอนนี้',roblox:'ชุดใน Roblox',map:'ชุดที่เซฟในแมพ',
   items:'ชิ้น',total:'ราคารวมชิ้นที่ยังขาย',free:'ฟรี',off:'ไม่ขาย',profile:'โปรไฟล์ Roblox',showMore:'แสดงเพิ่ม',
   noRoblox:'ไม่มีชุดที่สร้างเก็บไว้ใน Roblox',priv:'🔒 เจ้าตัวปิดการดูไอเทม/ชุดไว้ ดูได้แค่ชุดที่ใส่อยู่',
-  noMap:'ยังไม่เคยเซฟชุดในแมพ',mapPerm:'ยังเปิดดูชุดในแมพไม่ได้ (ต้องเพิ่มสิทธิ์ API key ให้อ่าน DataStore PlayerOutfitCodes_v1)',
+  noMap:'ยังไม่เคยเซฟชุดในแมพ',inv:'ไอเทมทั้งหมด',invPriv:'🔒 เจ้าตัวปิดการดูคลังไอเทมไว้ เลยดูไอเทมทั้งหมดไม่ได้',invEmpty:'ไม่มีไอเทมในหมวดนี้',invHint:'ไอเทมที่อยู่ในคลังของคนนี้ เรียงจากที่ได้มาล่าสุด',mapPerm:'ยังเปิดดูชุดในแมพไม่ได้ (ต้องเพิ่มสิทธิ์ API key ให้อ่าน DataStore PlayerOutfitCodes_v1)',
   code:'โค้ด',saved:'เซฟเมื่อ',sDef:'ค่าเริ่มต้น',by:'โดย',sNew:'ล่าสุด',sPd:'ราคา ↓',sPa:'ราคา ↑',sNa:'ชื่อ ก-ฮ',sNz:'ชื่อ ฮ-ก',grp:'แยกหมวด',flat:'รวม',grid:'ตาราง',list:'รายการ',smaller:'เล็กลง',bigger:'ใหญ่ขึ้น',outfits:'ชุด',fail:'โหลดไม่สำเร็จ ลองใหม่อีกครั้ง',back:'ค้นหาใหม่',
   foot:'ข้อมูลจาก Roblox (สาธารณะ) · ชุดที่เซฟในแมพ = ระบบบันทึกชุดในแมพ รวมมิจของtangsan',
   cats:{bundle:'ชุดเซ็ต (Bundle)',hair:'ผม',head:'หมวก / หัว',face:'หน้า',top:'เสื้อ',bottom:'กางเกง / กระโปรง',shoes:'รองเท้า',acc:'เครื่องประดับ',body:'ร่างกาย',anim:'ท่าเดิน / ท่าทาง',emote:'อีโมต',other:'อื่นๆ'}},
@@ -584,7 +634,7 @@ const T={
   loading:'Loading...',pick:'Several players found — pick one',wearing:'Wearing now',roblox:'Roblox outfits',map:'Saved in map',
   items:'items',total:'Total for items still on sale',free:'Free',off:'Off sale',profile:'Roblox profile',showMore:'Show more',
   noRoblox:'No outfits saved on their Roblox account',priv:'🔒 This player hides their inventory — only the current outfit is visible',
-  noMap:'No outfits saved in the map yet',mapPerm:'Map outfits not available yet (the API key needs read access to DataStore PlayerOutfitCodes_v1)',
+  noMap:'No outfits saved in the map yet',inv:'All items',invPriv:'🔒 This player hides their inventory, so their items can\'t be shown',invEmpty:'No items in this category',invHint:'Items in this player\'s inventory, newest first',mapPerm:'Map outfits not available yet (the API key needs read access to DataStore PlayerOutfitCodes_v1)',
   code:'Code',saved:'Saved',sDef:'Default',by:'by',sNew:'Newest',sPd:'Price ↓',sPa:'Price ↑',sNa:'Name A-Z',sNz:'Name Z-A',grp:'By category',flat:'All together',grid:'Grid',list:'List',smaller:'Smaller',bigger:'Bigger',outfits:'outfits',fail:'Could not load — please try again',back:'New search',
   foot:'Data from Roblox (public) · Map outfits come from the outfit saver in รวมมิจของtangsan',
   cats:{bundle:'Bundles',hair:'Hair',head:'Hats / Head',face:'Face',top:'Tops',bottom:'Bottoms',shoes:'Shoes',acc:'Accessories',body:'Body',anim:'Animations',emote:'Emotes',other:'Other'}}
@@ -595,7 +645,7 @@ const $=s=>document.querySelector(s), out=$('#out'), modal=$('#m'), mb=$('#mb');
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const t=k=>T[L][k];
 const itemCache={};
-let person=null, tab='wearing', shown=60;
+let person=null, tab='wearing', shown=60, invCat='bundle', inv={};
 const SIZES={i:[84,110,140,180],o:[96,130,165,210],r:[30,40,56,72]};
 const UI0={sort:'def',grp:true,view:'grid',size:1};
 let ui=(()=>{try{return Object.assign({},UI0,JSON.parse(localStorage.getItem('fo_ui')||'{}'))}catch(e){return Object.assign({},UI0)}})();
@@ -701,7 +751,7 @@ async function openPerson(uid){
   try{location.hash='u='+uid}catch(e){}
   try{
     person=await api('/api/fo/person?uid='+uid);
-    tab='wearing'; shown=60; renderPerson();
+    tab='wearing'; shown=60; inv={}; renderPerson();
     await fillItems(person.wearing.map(kOf)); if(tab==='wearing') renderPerson();
     retryThumbs();
   }catch(e){out.innerHTML='<div class="msg err">'+esc(e.message)+'</div>'}
@@ -711,10 +761,23 @@ function renderPerson(){
   const nR=p.robloxOutfits.length, nM=p.mapOutfits.length;
   let h='<div class="person"><img src="'+esc(p.head)+'" alt=""><div class="nm"><b>'+esc(p.displayName)+'</b><span>@'+esc(p.name)+' · ID '+p.id+'</span></div>'+
     '<a class="btn ghost" href="https://www.roblox.com/users/'+p.id+'/profile" target="_blank" rel="noopener">'+t('profile')+'</a></div>';
-  h+='<div class="tabs">'+[['wearing',t('wearing')+' ('+p.wearing.length+')'],['roblox',t('roblox')+' ('+(p.robloxPrivate?'🔒':nR)+')'],['map',t('map')+' ('+nM+')']]
+  h+='<div class="tabs">'+[['wearing',t('wearing')+' ('+p.wearing.length+')'],['inv',t('inv')+(p.robloxPrivate?' 🔒':'')],['roblox',t('roblox')+' ('+(p.robloxPrivate?'🔒':nR)+')'],['map',t('map')+' ('+nM+')']]
     .map(([k,l])=>'<button class="tab'+(tab===k?' on':'')+'" data-t="'+k+'">'+esc(l)+'</button>').join('')+'</div>';
   if(tab==='wearing'){
     h+='<div class="wear"><div class="avatar">'+(p.avatarImg?'<img src="'+esc(p.avatarImg)+'" alt="">':'')+'<div class="sum">'+totalHtml(p.wearing)+'</div></div><div>'+barHtml('items')+itemsHtml(p.wearing)+'</div></div>';
+  }else if(tab==='inv'){
+    const INV=['bundle','hair','head','face','top','bottom','shoes','acc','emote','anim','body'];
+    const st=inv[invCat];
+    h+='<div class="bar">'+INV.map(c=>{const x=inv[c];const n=x&&x.items&&!x.next?' ('+x.items.length+')':(x&&x.items&&x.items.length?' ('+x.items.length+'+)':'');return '<button class="chip'+(invCat===c?' on':'')+'" data-ic="'+c+'">'+esc(T[L].cats[c])+n+'</button>'}).join('')+'</div>';
+    if(!st||st.loading&&!st.items) h+='<div class="msg">'+t('loading')+'</div>';
+    else if(st.err) h+='<div class="note">'+esc(st.err)+'</div>';
+    else if(st.private) h+='<div class="note">'+t('invPriv')+'</div>';
+    else if(!st.items.length) h+='<div class="note">'+t('invEmpty')+'</div>';
+    else{
+      h+='<div class="total">'+esc(t('invHint'))+'</div>'+barHtml('items',st.items.length+(st.next?'+':'')+' '+t('items'));
+      const g0=ui.grp; ui.grp=false; h+=itemsHtml(st.items); ui.grp=g0;
+      if(st.next) h+='<button class="btn ghost more" id="imore">'+(st.loading?t('loading'):t('showMore'))+'</button>';
+    }
   }else if(tab==='roblox'){
     if(!nR) h+='<div class="note">'+(p.robloxPrivate?t('priv'):p.robloxErr?t('fail'):t('noRoblox'))+'</div>';
     else{
@@ -745,8 +808,27 @@ function renderPerson(){
   out.querySelectorAll('.tab').forEach(b=>b.onclick=async()=>{tab=b.dataset.t;renderPerson();
     if(tab==='map'&&p.mapOutfits.length){await fillItems([].concat(...p.mapOutfits.map(o=>o.items.slice(0,8).map(kOf))));if(tab==='map')renderPerson()}});
   const more=$('#more'); if(more) more.onclick=()=>{shown+=60;renderPerson();retryThumbs()};
+  out.querySelectorAll('[data-ic]').forEach(b=>b.onclick=()=>{invCat=b.dataset.ic;renderPerson();loadInv(invCat,false)});
+  const im=$('#imore'); if(im) im.onclick=()=>loadInv(invCat,true);
+  if(tab==='inv'&&!inv[invCat]) loadInv(invCat,false);
   out.querySelectorAll('[data-o]').forEach(e=>e.onclick=()=>openOutfit(e.dataset.o));
   out.querySelectorAll('[data-m]').forEach(e=>e.onclick=()=>openMap(+e.dataset.m));
+}
+async function loadInv(cat,more){
+  const p=person; if(!p) return;
+  let st=inv[cat];
+  if(st&&(st.loading||(!more&&st.items))) return;
+  if(!st) st=inv[cat]={items:null,next:null};
+  st.loading=true; st.err=null;
+  if(tab==='inv'&&invCat===cat) renderPerson();
+  try{
+    const r=await api('/api/fo/inv?uid='+p.id+'&cat='+cat+(more&&st.next?'&cursor='+encodeURIComponent(st.next):''));
+    if(person!==p) return;
+    st.private=r.private; st.items=(more&&st.items?st.items:[]).concat(r.items||[]); st.next=r.next||null;
+    st.loading=false; if(tab==='inv'&&invCat===cat) renderPerson();
+    await fillItems((r.items||[]).map(kOf));
+  }catch(e){st.loading=false; if(!st.items) st.err=e.message}
+  if(person===p&&tab==='inv'&&invCat===cat) renderPerson();
 }
 async function retryThumbs(){
   for(let n=0;n<3&&person;n++){

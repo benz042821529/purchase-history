@@ -434,13 +434,12 @@ def person(uid):
         with ThreadPoolExecutor(max_workers=3) as ex:
             f_av = ex.submit(lambda: _req(f"https://avatar.roblox.com/v1/users/{uid}/avatar"))
             f_ro = ex.submit(_roblox_outfits, uid)
-            f_mp = ex.submit(_map_outfits, uid)
             try:
                 av = f_av.result()
             except Exception as e:
                 print(f"[fo avatar {uid}] {e}"); av = {}
             ro, ro_err = f_ro.result()
-            mp, mp_err = f_mp.result()
+            mp, mp_err = [], None  # (2026-11-24) เอาชุดที่เซฟในแมพออกจากหน้าเว็บ (ผู้ใช้ขอ)
         wearing = merge_bundles(_assets_to_items(av.get("assets")))
         for e in av.get("emotes") or []:
             if e.get("assetId"):
@@ -761,7 +760,7 @@ footer{color:var(--sub);font-size:12px;text-align:center;margin-top:30px}
 <body>
 <div class="wrap">
 <header>
-  <h1 id="ttl">👕 ดูชุดผู้เล่น Roblox<small id="sub1">พิมพ์ ID หรือชื่อผู้เล่น → เห็นชุดที่ใส่อยู่ ชุดที่สร้างไว้ และชุดที่เซฟในแมพ</small></h1>
+  <h1 id="ttl">👕 ดูชุดผู้เล่น Roblox<small id="sub1">พิมพ์ ID หรือชื่อผู้เล่น → เห็นชุดที่ใส่อยู่ ไอเทมทั้งหมด และชุดที่สร้างไว้</small></h1>
   <div class="lang"><button data-l="th">ไทย</button><button data-l="en">EN</button></div>
 </header>
 <form class="search" id="f">
@@ -769,26 +768,26 @@ footer{color:var(--sub);font-size:12px;text-align:center;margin-top:30px}
   <button class="btn" id="go">ค้นหา</button>
 </form>
 <div id="out"></div>
-<footer id="foot">ข้อมูลจาก Roblox (สาธารณะ) · ชุดที่เซฟในแมพ = ระบบบันทึกชุดในแมพ รวมมิจของtangsan</footer>
+<footer id="foot">ข้อมูลจาก Roblox (สาธารณะ)</footer>
 </div>
 <div class="modal" id="m"><div class="box" id="mb"></div></div>
 <script>
 const T={
- th:{ttl:'👕 ดูชุดผู้เล่น Roblox',sub:'พิมพ์ ID หรือชื่อผู้เล่น → เห็นชุดที่ใส่อยู่ ชุดที่สร้างไว้ และชุดที่เซฟในแมพ',ph:'ID / @ชื่อผู้เล่น',go:'ค้นหา',
+ th:{ttl:'👕 ดูชุดผู้เล่น Roblox',sub:'พิมพ์ ID หรือชื่อผู้เล่น → เห็นชุดที่ใส่อยู่ ไอเทมทั้งหมด และชุดที่สร้างไว้',ph:'ID / @ชื่อผู้เล่น',go:'ค้นหา',
   loading:'กำลังโหลด...',pick:'เจอหลายคน เลือกคนที่ใช่',wearing:'ใส่อยู่ตอนนี้',roblox:'ชุดใน Roblox',map:'ชุดที่เซฟในแมพ',
   items:'ชิ้น',total:'ราคารวมชิ้นที่ยังขาย',free:'ฟรี',off:'ไม่ขาย',profile:'โปรไฟล์ Roblox',showMore:'แสดงเพิ่ม',
   noRoblox:'ไม่มีชุดที่สร้างเก็บไว้ใน Roblox',priv:'🔒 เจ้าตัวปิดการดูไอเทม/ชุดไว้ ดูได้แค่ชุดที่ใส่อยู่',
   noMap:'ยังไม่เคยเซฟชุดในแมพ',inv:'ไอเทมทั้งหมด',invPriv:'🔒 เจ้าตัวปิดการดูคลังไอเทมไว้ เลยดูไอเทมทั้งหมดไม่ได้',invEmpty:'ไม่มีไอเทมในหมวดนี้',invHint:'ไอเทมที่อยู่ในคลังของคนนี้ เรียงจากที่ได้มาล่าสุด',invHid:'ซ่อนชิ้นส่วนที่อยู่ในชุดเซ็ตแล้ว',mapPerm:'ยังเปิดดูชุดในแมพไม่ได้ (ต้องเพิ่มสิทธิ์ API key ให้อ่าน DataStore PlayerOutfitCodes_v1)',
   code:'โค้ด',saved:'เซฟเมื่อ',sDef:'ค่าเริ่มต้น',by:'โดย',sNew:'ล่าสุด',sPd:'ราคา ↓',sPa:'ราคา ↑',sNa:'ชื่อ ก-ฮ',sNz:'ชื่อ ฮ-ก',grp:'แยกหมวด',resale:'ขายต่อ',resaleTip:'ลิมิเต็ด ซื้อจาก Roblox ไม่ได้แล้ว ราคานี้คือราคาขายต่อที่ถูกที่สุด',offsale:'ไม่วางขาย',flat:'รวม',grid:'ตาราง',list:'รายการ',smaller:'เล็กลง',bigger:'ใหญ่ขึ้น',outfits:'ชุด',fail:'โหลดไม่สำเร็จ ลองใหม่อีกครั้ง',back:'ค้นหาใหม่',
-  foot:'ข้อมูลจาก Roblox (สาธารณะ) · ชุดที่เซฟในแมพ = ระบบบันทึกชุดในแมพ รวมมิจของtangsan',
+  foot:'ข้อมูลจาก Roblox (สาธารณะ)',
   cats:{bundle:'ชุดเซ็ต (Bundle)',hair:'ผม',head:'หมวก / หัว',face:'หน้า',top:'เสื้อ',bottom:'กางเกง / กระโปรง',shoes:'รองเท้า',acc:'เครื่องประดับ',body:'ร่างกาย',anim:'ท่าเดิน / ท่าทาง',emote:'อีโมต',other:'อื่นๆ'}},
- en:{ttl:'👕 Roblox Outfit Viewer',sub:"Type an ID or username → see what they're wearing, their saved Roblox outfits and outfits saved in the map",ph:'ID / @username',go:'Search',
+ en:{ttl:'👕 Roblox Outfit Viewer',sub:"Type an ID or username → see what they're wearing, all their items and their saved Roblox outfits",ph:'ID / @username',go:'Search',
   loading:'Loading...',pick:'Several players found — pick one',wearing:'Wearing now',roblox:'Roblox outfits',map:'Saved in map',
   items:'items',total:'Total for items still on sale',free:'Free',off:'Off sale',profile:'Roblox profile',showMore:'Show more',
   noRoblox:'No outfits saved on their Roblox account',priv:'🔒 This player hides their inventory — only the current outfit is visible',
   noMap:'No outfits saved in the map yet',inv:'All items',invPriv:'🔒 This player hides their inventory, so their items can\'t be shown',invEmpty:'No items in this category',invHint:'Items in this player\'s inventory, newest first',invHid:'pieces already shown under Bundles were hidden',mapPerm:'Map outfits not available yet (the API key needs read access to DataStore PlayerOutfitCodes_v1)',
   code:'Code',saved:'Saved',sDef:'Default',by:'by',sNew:'Newest',sPd:'Price ↓',sPa:'Price ↑',sNa:'Name A-Z',sNz:'Name Z-A',grp:'By category',resale:'resale',resaleTip:'Limited — no longer sold by Roblox; lowest resale price',offsale:'Off sale',flat:'All together',grid:'Grid',list:'List',smaller:'Smaller',bigger:'Bigger',outfits:'outfits',fail:'Could not load — please try again',back:'New search',
-  foot:'Data from Roblox (public) · Map outfits come from the outfit saver in รวมมิจของtangsan',
+  foot:'Data from Roblox (public)',
   cats:{bundle:'Bundles',hair:'Hair',head:'Hats / Head',face:'Face',top:'Tops',bottom:'Bottoms',shoes:'Shoes',acc:'Accessories',body:'Body',anim:'Animations',emote:'Emotes',other:'Other'}}
 };
 const ORDER=['bundle','hair','head','face','top','bottom','shoes','acc','body','anim','emote','other'];
@@ -928,7 +927,7 @@ function renderPerson(){
   const nR=p.robloxOutfits.length, nM=p.mapOutfits.length;
   let h='<div class="person"><img src="'+esc(p.head)+'" alt=""><div class="nm"><b>'+esc(p.displayName)+'</b><span>@'+esc(p.name)+' · ID '+p.id+'</span></div>'+
     '<a class="btn ghost" href="https://www.roblox.com/users/'+p.id+'/profile" target="_blank" rel="noopener">'+t('profile')+'</a></div>';
-  h+='<div class="tabs">'+[['wearing',t('wearing')+' ('+p.wearing.length+')'],['inv',t('inv')+(p.robloxPrivate?' 🔒':'')],['roblox',t('roblox')+' ('+(p.robloxPrivate?'🔒':nR)+')'],['map',t('map')+' ('+nM+')']]
+  h+='<div class="tabs">'+[['wearing',t('wearing')+' ('+p.wearing.length+')'],['inv',t('inv')+(p.robloxPrivate?' 🔒':'')],['roblox',t('roblox')+' ('+(p.robloxPrivate?'🔒':nR)+')']]
     .map(([k,l])=>'<button class="tab'+(tab===k?' on':'')+'" data-t="'+k+'">'+esc(l)+'</button>').join('')+'</div>';
   if(tab==='wearing'){
     h+='<div class="wear"><div class="avatar">'+(p.avatarImg?'<img src="'+esc(p.avatarImg)+'" alt="">':'')+'<div class="sum">'+totalHtml(p.wearing)+'</div></div><div>'+barHtml('items')+itemsHtml(p.wearing)+'</div></div>';

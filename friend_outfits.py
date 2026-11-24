@@ -668,7 +668,13 @@ def handle_get(path, query):
         if path == "/api/fo/invmeta": return 200, INV_META
         if path == "/api/fo/rawsale":  # (2026-11-24) ไว้ตรวจราคา: ข้อมูลดิบจาก catalog ของไอเทมเดียว
             iid = int(g("id") or 0); tp = "B" if g("tp") == "B" else "A"
-            return 200, {"status": _sale_status([{"id": iid, "tp": tp}]).get(f"{tp}_{iid}") if iid else None}
+            try:
+                cb = _h.get("catalog_batch")
+                raw = cb([(iid, tp)]) if cb else None
+                return 200, {"keys": [list(k) for k in (raw or {})], "status": _sale_status([{"id": iid, "tp": tp}]).get(f"{tp}_{iid}")}
+            except Exception as e:
+                import traceback
+                return 200, {"error": repr(e), "tb": traceback.format_exc()[-1500:]}
         if path == "/api/fo/thumbs":
             kind = g("kind")
             if kind not in THUMB_URL: raise FoError(400, "kind")

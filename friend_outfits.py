@@ -57,7 +57,7 @@ def _req(url, data=None, method=None, timeout=10):
                 return json.loads(r.read().decode())
         except urllib.error.HTTPError as e:
             if e.code == 429 or e.code >= 500:
-                time.sleep(0.6 * (attempt + 1)); continue
+                time.sleep((1.5 if e.code == 429 else 0.6) * (attempt + 1)); continue
             raise
         except (urllib.error.URLError, TimeoutError, ConnectionError):
             time.sleep(0.5); continue
@@ -491,17 +491,24 @@ def _inv_assets(uid, types, cursor):
 
 PIECE_TYPES_INV = set(PIECE_TYPES)  # ชิ้นที่มักมาจาก bundle (หัว/ตัว/แขนขา/ท่าเดิน/รองเท้า/สีหน้า) → ซ่อนถ้าอยู่ใน bundle ที่มีแล้ว
 
-def _bundle_piece_ids(uid):
-    """รหัสชิ้นส่วนทุกชิ้นที่อยู่ใน bundle ที่คนนี้มี → ใช้ซ่อนชิ้นซ้ำในหมวดร่างกาย/ท่าเดิน/รองเท้า/หน้า (bundle ขึ้นเป็นใบเดียวในหมวดชุดเซ็ตแล้ว)"""
+def _user_bundles(uid):
+    """bundle ทั้งหมดที่คนนี้มี (สูงสุด 1,000) จำไว้ 10 นาที — ใช้ทั้งหมวดชุดเซ็ตและการซ่อนชิ้นส่วน (ยิง catalog น้อยลง กันโดนจำกัดความถี่)"""
     def go():
-        bids, cur = [], ""
+        out, cur = [], ""
         for _ in range(10):
             q = {"limit": 100, "sortOrder": "Desc"}
             if cur: q["cursor"] = cur
             d = _req(f"https://catalog.roblox.com/v1/users/{uid}/bundles?" + urllib.parse.urlencode(q))
-            bids += [b["id"] for b in d.get("data") or [] if b.get("id")]
+            out += [{"id": b["id"], "name": b.get("name", ""), "type": b.get("bundleType", "")} for b in d.get("data") or [] if b.get("id")]
             cur = d.get("nextPageCursor")
             if not cur: break
+        return out
+    return _cached(("ubundles", uid), 600, go)
+
+def _bundle_piece_ids(uid):
+    """รหัสชิ้นส่วนทุกชิ้นที่อยู่ใน bundle ที่คนนี้มี → ใช้ซ่อนชิ้นซ้ำในหมวดร่างกาย/ท่าเดิน/รองเท้า/หน้า (bundle ขึ้นเป็นใบเดียวในหมวดชุดเซ็ตแล้ว)"""
+    def go():
+        bids = [b["id"] for b in _user_bundles(uid)]
         ids = set()
         for k in range(0, len(bids), 50):
             try:
@@ -527,15 +534,13 @@ def inventory(uid, cat, cursor):
     def go():
         try:
             if main == "bundle":
-                q = {"limit": 100, "sortOrder": "Desc"}
-                if cursor: q["cursor"] = cursor
-                d = _req(f"https://catalog.roblox.com/v1/users/{uid}/bundles?" + urllib.parse.urlencode(q))
-                items = [{"id": b["id"], "key": "b" + str(b["id"]), "bundle": True, "type": b.get("bundleType", ""),
-                          "cat": "bundle", "sub": BUNDLE_SUB.get(b.get("bundleType", ""), "bundle"), "name": b.get("name", "")}
-                         for b in d.get("data") or [] if b.get("id")]
-                if cat != "bundle":
-                    items = [it for it in items if it["type"] in types]
-                return {"items": items, "next": d.get("nextPageCursor"), "private": False, "hidden": 0}
+                allb = [b for b in _user_bundles(uid) if cat == "bundle" or b["type"] in types]
+                start = int(cursor) if cursor.isdigit() else 0
+                page = allb[start:start + 100]
+                items = [{"id": b["id"], "key": "b" + str(b["id"]), "bundle": True, "type": b["type"], "cat": "bundle",
+                          "sub": BUNDLE_SUB.get(b["type"], "bundle"), "name": b["name"]} for b in page]
+                nxt = str(start + 100) if start + 100 < len(allb) else None
+                return {"items": items, "next": nxt, "private": False, "hidden": 0}
             items, nxt = _inv_assets(uid, types, cursor)
             hidden = 0
             if items and any(t in PIECE_TYPES_INV for t in types):

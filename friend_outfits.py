@@ -443,11 +443,13 @@ header h1 small{display:block;font-size:13px;font-weight:400;color:var(--sub);ma
 .seg{display:inline-flex;background:var(--panel);border-radius:999px;padding:2px}
 .seg button{border:0;font:inherit;font-size:12px;cursor:pointer;padding:5px 11px;border-radius:999px;background:none;color:var(--sub);min-width:30px}
 .seg button.on{background:var(--lilac);color:#241b38}
+.seg button:disabled{opacity:.35;cursor:default}
+.seg button:not(:disabled):hover{color:var(--ink)}
 .sp{flex:1}.cnt{color:var(--sub);font-size:12px}
 .rows{display:grid;gap:4px}
 .rowi{display:flex;gap:10px;align-items:center;background:var(--panel);border-radius:10px;padding:5px 10px 5px 5px;text-decoration:none;cursor:pointer;border:1px solid transparent}
 .rowi:hover{border-color:var(--lilac)}
-.rowi .th{width:40px;height:40px;flex:none;background:var(--card);border-radius:8px;overflow:hidden}
+.rowi .th{width:var(--rsz,40px);height:var(--rsz,40px);flex:none;background:var(--card);border-radius:8px;overflow:hidden}
 .rowi .th img{width:100%;height:100%;object-fit:contain}
 .rowi .n{flex:1;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .rowi .n span{color:var(--sub);font-size:12px}
@@ -504,11 +506,11 @@ const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 const t=k=>T[L][k];
 const itemCache={};
 let person=null, tab='wearing', shown=60;
-const SIZES={i:[84,110,140,180],o:[96,130,165,210]};
+const SIZES={i:[84,110,140,180],o:[96,130,165,210],r:[30,40,56,72]};
 const UI0={sort:'def',grp:true,view:'grid',size:1};
 let ui=(()=>{try{return Object.assign({},UI0,JSON.parse(localStorage.getItem('fo_ui')||'{}'))}catch(e){return Object.assign({},UI0)}})();
 function saveUi(){try{localStorage.setItem('fo_ui',JSON.stringify(ui))}catch(e){}}
-function applySize(){document.body.style.setProperty('--isz',SIZES.i[ui.size]+'px');document.body.style.setProperty('--osz',SIZES.o[ui.size]+'px')}
+function applySize(){document.body.style.setProperty('--isz',SIZES.i[ui.size]+'px');document.body.style.setProperty('--osz',SIZES.o[ui.size]+'px');document.body.style.setProperty('--rsz',SIZES.r[ui.size]+'px');document.querySelectorAll('[data-z]').forEach(b=>b.disabled=(b.dataset.z==='-1'&&ui.size===0)||(b.dataset.z==='1'&&ui.size===3))}
 const prOf=it=>(itemCache[it.id]||{}).price||0;
 const nmOf=it=>String((itemCache[it.id]||{}).name||it.name||'').toLowerCase();
 function sortBy(list,kind,nameFn){
@@ -534,6 +536,7 @@ function bindBar(root,rerender){
   root.querySelectorAll('[data-g]').forEach(b=>b.onclick=()=>{ui.grp=b.dataset.g==='1';saveUi();rerender()});
   root.querySelectorAll('[data-v]').forEach(b=>b.onclick=()=>{ui.view=b.dataset.v;saveUi();rerender()});
   root.querySelectorAll('[data-z]').forEach(b=>b.onclick=()=>{ui.size=Math.max(0,Math.min(3,ui.size+(+b.dataset.z)));saveUi();applySize()});
+  applySize();
 }
 applySize();
 

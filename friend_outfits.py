@@ -419,24 +419,40 @@ header h1 small{display:block;font-size:13px;font-weight:400;color:var(--sub);ma
 .avatar .sum{color:var(--sub);font-size:13px;margin-top:6px}
 .cat{margin-bottom:14px}
 .cat h3{font-size:14px;font-weight:500;color:var(--lilac);margin:0 0 8px}
-.items{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:8px}
-.item{background:var(--panel);border-radius:14px;padding:8px;display:flex;flex-direction:column;gap:6px;text-decoration:none}
+.items{display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--isz,110px),1fr));gap:6px}
+.item{background:var(--panel);border-radius:12px;padding:6px;display:flex;flex-direction:column;gap:4px;text-decoration:none}
 .item:hover{outline:1px solid var(--lilac)}
 .item .th{background:var(--card);border-radius:10px;aspect-ratio:1;display:flex;align-items:center;justify-content:center;overflow:hidden}
 .item .th img{width:100%;height:100%;object-fit:contain}
-.item .n{font-size:13px;line-height:1.25;height:2.5em;overflow:hidden}
-.item .p{font-size:13px;font-weight:500;color:var(--gold)}
+.item .n{font-size:12px;line-height:1.25;height:2.5em;overflow:hidden}
+.item .p,.rowi .p{font-size:12px;font-weight:500;color:var(--gold);white-space:nowrap}
 .item .p.free{color:var(--green)}.item .p.off{color:var(--sub);font-weight:400}
-.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
-.of{background:var(--panel);border-radius:16px;padding:8px;cursor:pointer;border:1px solid transparent}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--osz,130px),1fr));gap:8px}
+.of{background:var(--panel);border-radius:12px;padding:6px;cursor:pointer;border:1px solid transparent}
 .of:hover{border-color:var(--lilac)}
 .of .th{background:var(--card);border-radius:12px;aspect-ratio:1;overflow:hidden;display:flex;align-items:center;justify-content:center}
 .of .th img{width:100%;height:100%;object-fit:contain}
 .of .collage{display:grid;grid-template-columns:1fr 1fr;width:100%;height:100%}
 .of .collage img{width:100%;height:100%;object-fit:contain}
-.of .t{font-size:14px;margin-top:6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.of .t{font-size:13px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .of .s{font-size:12px;color:var(--sub)}
 .more{display:block;margin:14px auto 0}
+.bar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 10px}
+.chip{border:0;font:inherit;font-size:12px;cursor:pointer;padding:6px 12px;border-radius:999px;background:var(--panel);color:var(--sub)}
+.chip.on{background:var(--lilac);color:#241b38}
+.seg{display:inline-flex;background:var(--panel);border-radius:999px;padding:2px}
+.seg button{border:0;font:inherit;font-size:12px;cursor:pointer;padding:5px 11px;border-radius:999px;background:none;color:var(--sub);min-width:30px}
+.seg button.on{background:var(--lilac);color:#241b38}
+.sp{flex:1}.cnt{color:var(--sub);font-size:12px}
+.rows{display:grid;gap:4px}
+.rowi{display:flex;gap:10px;align-items:center;background:var(--panel);border-radius:10px;padding:5px 10px 5px 5px;text-decoration:none;cursor:pointer;border:1px solid transparent}
+.rowi:hover{border-color:var(--lilac)}
+.rowi .th{width:40px;height:40px;flex:none;background:var(--card);border-radius:8px;overflow:hidden}
+.rowi .th img{width:100%;height:100%;object-fit:contain}
+.rowi .n{flex:1;min-width:0;font-size:13px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rowi .n span{color:var(--sub);font-size:12px}
+.rowi .p.off{color:var(--sub);font-weight:400}
+.item .by{font-size:11px;color:var(--lilac);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .note{background:var(--panel);border-radius:12px;padding:12px 14px;color:var(--sub);font-size:14px}
 .modal{position:fixed;inset:0;background:rgba(10,10,14,.75);display:none;align-items:flex-start;justify-content:center;padding:24px 12px;overflow:auto;z-index:10}
 .modal.on{display:flex}
@@ -469,7 +485,7 @@ const T={
   items:'ชิ้น',total:'ราคารวมชิ้นที่ยังขาย',free:'ฟรี',off:'ไม่ขาย',profile:'โปรไฟล์ Roblox',showMore:'แสดงเพิ่ม',
   noRoblox:'ไม่มีชุดที่สร้างเก็บไว้ใน Roblox',priv:'🔒 เจ้าตัวปิดการดูไอเทม/ชุดไว้ ดูได้แค่ชุดที่ใส่อยู่',
   noMap:'ยังไม่เคยเซฟชุดในแมพ',mapPerm:'ยังเปิดดูชุดในแมพไม่ได้ (ต้องเพิ่มสิทธิ์ API key ให้อ่าน DataStore PlayerOutfitCodes_v1)',
-  code:'โค้ด',saved:'เซฟเมื่อ',fail:'โหลดไม่สำเร็จ ลองใหม่อีกครั้ง',back:'ค้นหาใหม่',
+  code:'โค้ด',saved:'เซฟเมื่อ',sDef:'ค่าเริ่มต้น',by:'โดย',sNew:'ล่าสุด',sPd:'ราคา ↓',sPa:'ราคา ↑',sNa:'ชื่อ ก-ฮ',sNz:'ชื่อ ฮ-ก',grp:'แยกหมวด',flat:'รวม',grid:'ตาราง',list:'รายการ',smaller:'เล็กลง',bigger:'ใหญ่ขึ้น',outfits:'ชุด',fail:'โหลดไม่สำเร็จ ลองใหม่อีกครั้ง',back:'ค้นหาใหม่',
   foot:'ข้อมูลจาก Roblox (สาธารณะ) · ชุดที่เซฟในแมพ = ระบบบันทึกชุดในแมพ รวมมิจของtangsan',
   cats:{hair:'ผม',head:'หมวก / หัว',face:'หน้า',top:'เสื้อ',bottom:'กางเกง / กระโปรง',shoes:'รองเท้า',acc:'เครื่องประดับ',body:'ร่างกาย',anim:'ท่าเดิน / ท่าทาง',emote:'อีโมต',other:'อื่นๆ'}},
  en:{ttl:'👕 Roblox Outfit Viewer',sub:"Type an ID or username → see what they're wearing, their saved Roblox outfits and outfits saved in the map",ph:'ID / @username',go:'Search',
@@ -477,7 +493,7 @@ const T={
   items:'items',total:'Total for items still on sale',free:'Free',off:'Off sale',profile:'Roblox profile',showMore:'Show more',
   noRoblox:'No outfits saved on their Roblox account',priv:'🔒 This player hides their inventory — only the current outfit is visible',
   noMap:'No outfits saved in the map yet',mapPerm:'Map outfits not available yet (the API key needs read access to DataStore PlayerOutfitCodes_v1)',
-  code:'Code',saved:'Saved',fail:'Could not load — please try again',back:'New search',
+  code:'Code',saved:'Saved',sDef:'Default',by:'by',sNew:'Newest',sPd:'Price ↓',sPa:'Price ↑',sNa:'Name A-Z',sNz:'Name Z-A',grp:'By category',flat:'All together',grid:'Grid',list:'List',smaller:'Smaller',bigger:'Bigger',outfits:'outfits',fail:'Could not load — please try again',back:'New search',
   foot:'Data from Roblox (public) · Map outfits come from the outfit saver in รวมมิจของtangsan',
   cats:{hair:'Hair',head:'Hats / Head',face:'Face',top:'Tops',bottom:'Bottoms',shoes:'Shoes',acc:'Accessories',body:'Body',anim:'Animations',emote:'Emotes',other:'Other'}}
 };
@@ -488,6 +504,38 @@ const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 const t=k=>T[L][k];
 const itemCache={};
 let person=null, tab='wearing', shown=60;
+const SIZES={i:[84,110,140,180],o:[96,130,165,210]};
+const UI0={sort:'def',grp:true,view:'grid',size:1};
+let ui=(()=>{try{return Object.assign({},UI0,JSON.parse(localStorage.getItem('fo_ui')||'{}'))}catch(e){return Object.assign({},UI0)}})();
+function saveUi(){try{localStorage.setItem('fo_ui',JSON.stringify(ui))}catch(e){}}
+function applySize(){document.body.style.setProperty('--isz',SIZES.i[ui.size]+'px');document.body.style.setProperty('--osz',SIZES.o[ui.size]+'px')}
+const prOf=it=>(itemCache[it.id]||{}).price||0;
+const nmOf=it=>String((itemCache[it.id]||{}).name||it.name||'').toLowerCase();
+function sortBy(list,kind,nameFn){
+  const a=list.slice(), s=ui.sort;
+  if(kind==='items'&&s==='pd') a.sort((x,y)=>prOf(y)-prOf(x));
+  else if(kind==='items'&&s==='pa') a.sort((x,y)=>(prOf(x)||1e9)-(prOf(y)||1e9));
+  else if(s==='na') a.sort((x,y)=>nameFn(x).localeCompare(nameFn(y),L));
+  else if(s==='nz') a.sort((x,y)=>nameFn(y).localeCompare(nameFn(x),L));
+  return a;
+}
+function barHtml(kind,extra){
+  const sorts=[['def',kind==='map'?t('sNew'):t('sDef')]].concat(kind==='items'?[['pd',t('sPd')],['pa',t('sPa')]]:[]).concat([['na',t('sNa')],['nz',t('sNz')]]);
+  const cur=sorts.some(x=>x[0]===ui.sort)?ui.sort:'def';
+  let h='<div class="bar">'+sorts.map(([k,l])=>'<button class="chip'+(cur===k?' on':'')+'" data-s="'+k+'">'+esc(l)+'</button>').join('');
+  if(kind==='items') h+='<span class="seg"><button data-g="1" class="'+(ui.grp?'on':'')+'">'+esc(t('grp'))+'</button><button data-g="0" class="'+(ui.grp?'':'on')+'">'+esc(t('flat'))+'</button></span>';
+  h+='<span class="sp"></span>'+(extra?'<span class="cnt">'+extra+'</span>':'');
+  h+='<span class="seg"><button data-v="grid" class="'+(ui.view==='grid'?'on':'')+'" title="'+esc(t('grid'))+'">▦</button><button data-v="list" class="'+(ui.view==='list'?'on':'')+'" title="'+esc(t('list'))+'">☰</button></span>';
+  h+='<span class="seg"><button data-z="-1" title="'+esc(t('smaller'))+'">−</button><button data-z="1" title="'+esc(t('bigger'))+'">+</button></span></div>';
+  return h;
+}
+function bindBar(root,rerender){
+  root.querySelectorAll('[data-s]').forEach(b=>b.onclick=()=>{ui.sort=b.dataset.s;saveUi();rerender()});
+  root.querySelectorAll('[data-g]').forEach(b=>b.onclick=()=>{ui.grp=b.dataset.g==='1';saveUi();rerender()});
+  root.querySelectorAll('[data-v]').forEach(b=>b.onclick=()=>{ui.view=b.dataset.v;saveUi();rerender()});
+  root.querySelectorAll('[data-z]').forEach(b=>b.onclick=()=>{ui.size=Math.max(0,Math.min(3,ui.size+(+b.dataset.z)));saveUi();applySize()});
+}
+applySize();
 
 function applyLang(){
   document.documentElement.lang=L;
@@ -515,20 +563,25 @@ async function fillItems(ids){
     try{Object.assign(itemCache,await api('/api/fo/items',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:need.slice(k,k+60)})}))}catch(e){}
   }
 }
+function itemCard(it){
+  const d=itemCache[it.id]||{};
+  const nm=d.name||it.name||('#'+it.id);
+  const th=d.thumb?'<img loading="lazy" src="'+esc(d.thumb)+'" alt="">':'';
+  const href='https://www.roblox.com/catalog/'+it.id;
+  const by=d.creator?'<div class="by">'+esc(t('by'))+' '+esc(d.creator)+'</div>':'';
+  const tip=esc(nm+(d.creator?' — '+t('by')+' '+d.creator:''));
+  if(ui.view==='list') return '<a class="rowi" href="'+href+'" target="_blank" rel="noopener" title="'+tip+'"><div class="th">'+th+'</div><div class="n">'+esc(nm)+' <span>· '+esc(T[L].cats[it.cat])+(d.creator?' · '+esc(t('by'))+' '+esc(d.creator):'')+'</span></div>'+priceHtml(d)+'</a>';
+  return '<a class="item" href="'+href+'" target="_blank" rel="noopener" title="'+tip+'"><div class="th">'+th+'</div><div class="n">'+esc(nm)+'</div>'+by+priceHtml(d)+'</a>';
+}
 function itemsHtml(items){
+  const list=sortBy(items,'items',nmOf), wrap=ui.view==='list'?'rows':'items';
+  if(!ui.grp) return '<div class="'+wrap+'">'+list.map(itemCard).join('')+'</div>';
   const groups={};
-  items.forEach(it=>(groups[it.cat]=groups[it.cat]||[]).push(it));
+  list.forEach(it=>(groups[it.cat]=groups[it.cat]||[]).push(it));
   let h='';
   ORDER.forEach(c=>{
     if(!groups[c]) return;
-    h+='<div class="cat"><h3>'+esc(T[L].cats[c])+' · '+groups[c].length+'</h3><div class="items">';
-    groups[c].forEach(it=>{
-      const d=itemCache[it.id]||{};
-      const nm=d.name||it.name||('#'+it.id);
-      const th=d.thumb?'<img loading="lazy" src="'+esc(d.thumb)+'" alt="">':'';
-      h+='<a class="item" href="https://www.roblox.com/catalog/'+it.id+'" target="_blank" rel="noopener"><div class="th">'+th+'</div><div class="n">'+esc(nm)+'</div>'+priceHtml(d)+'</a>';
-    });
-    h+='</div></div>';
+    h+='<div class="cat"><h3>'+esc(T[L].cats[c])+' · '+groups[c].length+'</h3><div class="'+wrap+'">'+groups[c].map(itemCard).join('')+'</div></div>';
   });
   return h;
 }
@@ -567,22 +620,34 @@ function renderPerson(){
   h+='<div class="tabs">'+[['wearing',t('wearing')+' ('+p.wearing.length+')'],['roblox',t('roblox')+' ('+(p.robloxPrivate?'🔒':nR)+')'],['map',t('map')+' ('+nM+')']]
     .map(([k,l])=>'<button class="tab'+(tab===k?' on':'')+'" data-t="'+k+'">'+esc(l)+'</button>').join('')+'</div>';
   if(tab==='wearing'){
-    h+='<div class="wear"><div class="avatar">'+(p.avatarImg?'<img src="'+esc(p.avatarImg)+'" alt="">':'')+'<div class="sum">'+totalHtml(p.wearing)+'</div></div><div>'+itemsHtml(p.wearing)+'</div></div>';
+    h+='<div class="wear"><div class="avatar">'+(p.avatarImg?'<img src="'+esc(p.avatarImg)+'" alt="">':'')+'<div class="sum">'+totalHtml(p.wearing)+'</div></div><div>'+barHtml('items')+itemsHtml(p.wearing)+'</div></div>';
   }else if(tab==='roblox'){
     if(!nR) h+='<div class="note">'+(p.robloxPrivate?t('priv'):p.robloxErr?t('fail'):t('noRoblox'))+'</div>';
     else{
-      h+='<div class="grid">'+p.robloxOutfits.slice(0,shown).map(o=>'<div class="of" data-o="'+o.id+'"><div class="th">'+(o.img?'<img loading="lazy" src="'+esc(o.img)+'" alt="">':'')+'</div><div class="t">'+esc(o.name)+'</div></div>').join('')+'</div>';
+      const ro=sortBy(p.robloxOutfits,'outfits',o=>String(o.name||'').toLowerCase()).slice(0,shown);
+      const img=o=>o.img?'<img loading="lazy" src="'+esc(o.img)+'" alt="">':'';
+      h+=barHtml('outfits',nR+' '+t('outfits'));
+      h+=ui.view==='list'
+        ?'<div class="rows">'+ro.map(o=>'<div class="rowi" data-o="'+o.id+'"><div class="th">'+img(o)+'</div><div class="n">'+esc(o.name)+'</div></div>').join('')+'</div>'
+        :'<div class="grid">'+ro.map(o=>'<div class="of" data-o="'+o.id+'"><div class="th">'+img(o)+'</div><div class="t">'+esc(o.name)+'</div></div>').join('')+'</div>';
       if(nR>shown) h+='<button class="btn ghost more" id="more">'+t('showMore')+' ('+(nR-shown)+')</button>';
     }
   }else{
     if(p.mapErr==='noperm') h+='<div class="note">'+t('mapPerm')+'</div>';
     else if(!nM) h+='<div class="note">'+t('noMap')+'</div>';
-    else h+='<div class="grid">'+p.mapOutfits.map((o,i)=>{
-      const imgs=o.items.filter(x=>['hair','head','top','bottom','acc','face','shoes'].includes(x.cat)).slice(0,4).map(x=>(itemCache[x.id]||{}).thumb).filter(Boolean);
-      const date=o.savedAt?new Date(o.savedAt*1000).toLocaleDateString(L==='th'?'th-TH':'en-GB'):'';
-      return '<div class="of" data-m="'+i+'"><div class="th"><div class="collage">'+imgs.map(u=>'<img src="'+esc(u)+'" alt="">').join('')+'</div></div><div class="t">'+esc(o.name||o.code)+'</div><div class="s">'+t('code')+' '+esc(o.code)+' · '+o.items.length+' '+t('items')+(date?' · '+date:'')+'</div></div>'}).join('')+'</div>';
+    else{
+      const order=sortBy(p.mapOutfits.map((o,i)=>Object.assign({i},o)),'map',o=>String(o.name||o.code||'').toLowerCase());
+      h+=barHtml('map',nM+' '+t('outfits'));
+      h+='<div class="'+(ui.view==='list'?'rows':'grid')+'">'+order.map(o=>{
+        const imgs=o.items.filter(x=>['hair','head','top','bottom','acc','face','shoes'].includes(x.cat)).slice(0,4).map(x=>(itemCache[x.id]||{}).thumb).filter(Boolean);
+        const date=o.savedAt?new Date(o.savedAt*1000).toLocaleDateString(L==='th'?'th-TH':'en-GB'):'';
+        const sub=t('code')+' '+esc(o.code)+' · '+o.items.length+' '+t('items')+(date?' · '+date:'');
+        if(ui.view==='list') return '<div class="rowi" data-m="'+o.i+'"><div class="th">'+(imgs[0]?'<img src="'+esc(imgs[0])+'" alt="">':'')+'</div><div class="n">'+esc(o.name||o.code)+' <span>· '+sub+'</span></div></div>';
+        return '<div class="of" data-m="'+o.i+'"><div class="th"><div class="collage">'+imgs.map(u=>'<img src="'+esc(u)+'" alt="">').join('')+'</div></div><div class="t">'+esc(o.name||o.code)+'</div><div class="s">'+sub+'</div></div>'}).join('')+'</div>';
+    }
   }
   out.innerHTML=h;
+  bindBar(out,renderPerson);
   out.querySelectorAll('.tab').forEach(b=>b.onclick=async()=>{tab=b.dataset.t;renderPerson();
     if(tab==='map'&&p.mapOutfits.length){await fillItems([].concat(...p.mapOutfits.map(o=>o.items.slice(0,8).map(x=>x.id))));if(tab==='map')renderPerson()}});
   const more=$('#more'); if(more) more.onclick=()=>{shown+=60;renderPerson();retryThumbs()};
@@ -610,14 +675,16 @@ async function openOutfit(id){
   try{
     const d=await api('/api/fo/outfit?id='+id);
     await fillItems(d.items.map(i=>i.id));
-    showModal(o.name||d.name,'<div class="wear"><div class="avatar">'+(o.img?'<img src="'+esc(o.img)+'" alt="">':'')+'<div class="sum">'+totalHtml(d.items)+'</div></div><div>'+itemsHtml(d.items)+'</div></div>');
+    const draw=()=>{showModal(o.name||d.name,'<div class="wear"><div class="avatar">'+(o.img?'<img src="'+esc(o.img)+'" alt="">':'')+'<div class="sum">'+totalHtml(d.items)+'</div></div><div>'+barHtml('items')+itemsHtml(d.items)+'</div></div>');bindBar(mb,()=>{draw();renderPerson()})};
+    draw();
   }catch(e){showModal(o.name||'','<div class="msg err">'+esc(e.message)+'</div>')}
 }
 async function openMap(i){
   const o=person.mapOutfits[i];
   showModal((o.name||o.code)+' · '+t('code')+' '+o.code,'<div class="msg">'+t('loading')+'</div>');
   await fillItems(o.items.map(x=>x.id));
-  showModal((o.name||o.code)+' · '+t('code')+' '+o.code,totalHtml(o.items)+itemsHtml(o.items));
+  const draw=()=>{showModal((o.name||o.code)+' · '+t('code')+' '+o.code,totalHtml(o.items)+barHtml('items')+itemsHtml(o.items));bindBar(mb,()=>{draw();renderPerson()})};
+  draw();
 }
 $('#f').onsubmit=e=>{e.preventDefault();search($('#q').value)};
 applyLang();

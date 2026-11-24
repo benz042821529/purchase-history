@@ -807,7 +807,7 @@ const T={
   items:'ชิ้น',total:'ราคารวมชิ้นที่ยังขาย',free:'ฟรี',off:'ไม่ขาย',profile:'โปรไฟล์ Roblox',showMore:'แสดงเพิ่ม',
   noRoblox:'ไม่มีชุดที่สร้างเก็บไว้ใน Roblox',priv:'🔒 เจ้าตัวปิดการดูไอเทม/ชุดไว้ ดูได้แค่ชุดที่ใส่อยู่',
   noMap:'ยังไม่เคยเซฟชุดในแมพ',inv:'ไอเทมทั้งหมด',invPriv:'🔒 เจ้าตัวปิดการดูคลังไอเทมไว้ เลยดูไอเทมทั้งหมดไม่ได้',invEmpty:'ไม่มีไอเทมในหมวดนี้',invHint:'ไอเทมที่อยู่ในคลังของคนนี้ เรียงจากที่ได้มาล่าสุด',invHid:'ซ่อนชิ้นส่วนที่อยู่ในชุดเซ็ตแล้ว',mapPerm:'ยังเปิดดูชุดในแมพไม่ได้ (ต้องเพิ่มสิทธิ์ API key ให้อ่าน DataStore PlayerOutfitCodes_v1)',
-  code:'โค้ด',saved:'เซฟเมื่อ',sDef:'ค่าเริ่มต้น',by:'โดย',sNew:'ล่าสุด',sPd:'ราคา ↓',sPa:'ราคา ↑',sNa:'ชื่อ ก-ฮ',sNz:'ชื่อ ฮ-ก',grp:'แยกหมวด',wearErr:'ดึงชุดที่ใส่อยู่ไม่สำเร็จ (Roblox ตอบช้า) กดค้นหาอีกครั้ง',resale:'ขายต่อ',resaleTip:'ลิมิเต็ด ซื้อจาก Roblox ไม่ได้แล้ว ราคานี้คือราคาขายต่อที่ถูกที่สุด',offsale:'ไม่วางขาย',flat:'รวม',grid:'ตาราง',list:'รายการ',smaller:'เล็กลง',bigger:'ใหญ่ขึ้น',outfits:'ชุด',fail:'โหลดไม่สำเร็จ ลองใหม่อีกครั้ง',back:'ค้นหาใหม่',
+  code:'โค้ด',saved:'เซฟเมื่อ',sDef:'ค่าเริ่มต้น',by:'โดย',sNew:'ล่าสุด',sPd:'ราคา ↓',sPa:'ราคา ↑',sNa:'ชื่อ ก-ฮ',sNz:'ชื่อ ฮ-ก',grp:'แยกหมวด',wearErr:'Roblox ตอบช้า กำลังลองดึงชุดที่ใส่อยู่ใหม่อัตโนมัติ...',wearFail:'ยังดึงชุดที่ใส่อยู่ไม่ได้ ลองกดค้นหาอีกครั้งภายหลัง',resale:'ขายต่อ',resaleTip:'ลิมิเต็ด ซื้อจาก Roblox ไม่ได้แล้ว ราคานี้คือราคาขายต่อที่ถูกที่สุด',offsale:'ไม่วางขาย',flat:'รวม',grid:'ตาราง',list:'รายการ',smaller:'เล็กลง',bigger:'ใหญ่ขึ้น',outfits:'ชุด',fail:'โหลดไม่สำเร็จ ลองใหม่อีกครั้ง',back:'ค้นหาใหม่',
   foot:'ข้อมูลจาก Roblox (สาธารณะ)',
   cats:{bundle:'ชุดเซ็ต (Bundle)',hair:'ผม',head:'หมวก / หัว',face:'หน้า',top:'เสื้อ',bottom:'กางเกง / กระโปรง',shoes:'รองเท้า',acc:'เครื่องประดับ',body:'ร่างกาย',anim:'ท่าเดิน / ท่าทาง',emote:'อีโมต',other:'อื่นๆ'}},
  en:{ttl:'👕 Roblox Outfit Viewer',sub:"Type an ID or username → see what they're wearing, all their items and their saved Roblox outfits",ph:'ID / @username',go:'Search',
@@ -815,7 +815,7 @@ const T={
   items:'items',total:'Total for items still on sale',free:'Free',off:'Off sale',profile:'Roblox profile',showMore:'Show more',
   noRoblox:'No outfits saved on their Roblox account',priv:'🔒 This player hides their inventory — only the current outfit is visible',
   noMap:'No outfits saved in the map yet',inv:'All items',invPriv:'🔒 This player hides their inventory, so their items can\'t be shown',invEmpty:'No items in this category',invHint:'Items in this player\'s inventory, newest first',invHid:'pieces already shown under Bundles were hidden',mapPerm:'Map outfits not available yet (the API key needs read access to DataStore PlayerOutfitCodes_v1)',
-  code:'Code',saved:'Saved',sDef:'Default',by:'by',sNew:'Newest',sPd:'Price ↓',sPa:'Price ↑',sNa:'Name A-Z',sNz:'Name Z-A',grp:'By category',wearErr:'Could not load what they\'re wearing (Roblox is slow) — search again',resale:'resale',resaleTip:'Limited — no longer sold by Roblox; lowest resale price',offsale:'Off sale',flat:'All together',grid:'Grid',list:'List',smaller:'Smaller',bigger:'Bigger',outfits:'outfits',fail:'Could not load — please try again',back:'New search',
+  code:'Code',saved:'Saved',sDef:'Default',by:'by',sNew:'Newest',sPd:'Price ↓',sPa:'Price ↑',sNa:'Name A-Z',sNz:'Name Z-A',grp:'By category',wearErr:'Roblox is slow — retrying automatically...',wearFail:'Still couldn\'t load what they\'re wearing — try searching again later',resale:'resale',resaleTip:'Limited — no longer sold by Roblox; lowest resale price',offsale:'Off sale',flat:'All together',grid:'Grid',list:'List',smaller:'Smaller',bigger:'Bigger',outfits:'outfits',fail:'Could not load — please try again',back:'New search',
   foot:'Data from Roblox (public)',
   cats:{bundle:'Bundles',hair:'Hair',head:'Hats / Head',face:'Face',top:'Tops',bottom:'Bottoms',shoes:'Shoes',acc:'Accessories',body:'Body',anim:'Animations',emote:'Emotes',other:'Other'}}
 };
@@ -949,17 +949,35 @@ async function openPerson(uid){
     tab='wearing'; shown=60; inv={}; renderPerson();
     await fillItems(person.wearing.map(kOf)); if(tab==='wearing') renderPerson();
     retryThumbs();
+    if(person.wearErr) retryWearing(uid);
   }catch(e){out.innerHTML='<div class="msg err">'+esc(e.message)+'</div>'}
+}
+// (2026-11-24) ดึงชุดที่ใส่อยู่ไม่สำเร็จ → ลองใหม่เองเบื้องหลัง ไม่ต้องรีโหลด/กดค้นหาซ้ำ
+async function retryWearing(uid){
+  for(let n=0;n<6;n++){
+    await new Promise(r=>setTimeout(r,3000+n*2000));
+    if(!person||String(person.id)!==String(uid)) return;  // เปลี่ยนไปดูคนอื่นแล้ว
+    try{
+      const p2=await api('/api/fo/person?uid='+uid);
+      if(!person||String(person.id)!==String(uid)) return;
+      if(!p2.wearErr){
+        person.wearing=p2.wearing; person.avatarType=p2.avatarType; person.wearErr=false;
+        if(!person.avatarImg) person.avatarImg=p2.avatarImg;
+        renderPerson(); await fillItems(person.wearing.map(kOf)); renderPerson(); return;
+      }
+    }catch(e){}
+  }
+  if(person&&String(person.id)===String(uid)){person.wearGaveUp=true; renderPerson()}
 }
 function renderPerson(){
   const p=person; if(!p) return;
   const nR=p.robloxOutfits.length, nM=p.mapOutfits.length;
   let h='<div class="person"><img src="'+esc(p.head)+'" alt=""><div class="nm"><b>'+esc(p.displayName)+'</b><span>@'+esc(p.name)+' · ID '+p.id+'</span></div>'+
     '<a class="btn ghost" href="https://www.roblox.com/users/'+p.id+'/profile" target="_blank" rel="noopener">'+t('profile')+'</a></div>';
-  h+='<div class="tabs">'+[['wearing',t('wearing')+' ('+p.wearing.length+')'],['inv',t('inv')+(p.robloxPrivate?' 🔒':'')],['roblox',t('roblox')+' ('+(p.robloxPrivate?'🔒':nR)+')']]
+  h+='<div class="tabs">'+[['wearing',t('wearing')+' ('+(p.wearErr?'…':p.wearing.length)+')'],['inv',t('inv')+(p.robloxPrivate?' 🔒':'')],['roblox',t('roblox')+' ('+(p.robloxPrivate?'🔒':nR)+')']]
     .map(([k,l])=>'<button class="tab'+(tab===k?' on':'')+'" data-t="'+k+'">'+esc(l)+'</button>').join('')+'</div>';
   if(tab==='wearing'){
-    h+='<div class="wear"><div class="avatar">'+(p.avatarImg?'<img src="'+esc(p.avatarImg)+'" alt="">':'')+'<div class="sum">'+totalHtml(p.wearing)+'</div></div><div>'+(p.wearErr?'<p class="msg">'+esc(t('wearErr'))+'</p>':barHtml('items')+itemsHtml(p.wearing))+'</div></div>';
+    h+='<div class="wear"><div class="avatar">'+(p.avatarImg?'<img src="'+esc(p.avatarImg)+'" alt="">':'')+'<div class="sum">'+totalHtml(p.wearing)+'</div></div><div>'+(p.wearErr?'<p class="msg">'+esc(t(p.wearGaveUp?'wearFail':'wearErr'))+'</p>':barHtml('items')+itemsHtml(p.wearing))+'</div></div>';
   }else if(tab==='inv'){
     const st=inv[invCat], mainK=invCat.split('.')[0], main=INVMETA.mains.find(m=>m.k===mainK)||INVMETA.mains[0];
     const cnt=c=>{const x=inv[c];return x&&x.items?' ('+x.items.length+(x.next?'+':'')+')':''};

@@ -213,8 +213,8 @@ INV_MAINS = [
         ("hair", "ผม", "Hair", ["HairAccessory"], []),
         ("heads", "หัว", "Heads", ["DynamicHead", "Head"], ["DynamicHead"]),
         ("faces", "หน้า", "Faces", ["Face"], []),
-        ("parts", "ส่วนร่างกาย", "Body Parts", ["Torso", "LeftArm", "RightArm", "LeftLeg", "RightLeg"], []),
-        ("moods", "สีหน้า", "Moods", ["MoodAnimation"], []),
+        # ส่วนร่างกาย/สีหน้า ส่วนใหญ่มาจาก bundle (ซ่อนอยู่แล้ว) → ไม่ทำเป็นหมวดย่อย แต่ยังนับใน "ทั้งหมด"
+        ("", "", "", ["Torso", "LeftArm", "RightArm", "LeftLeg", "RightLeg", "MoodAnimation"], []),
     ]),
     ("clothing", "เสื้อผ้า", "Clothing", [
         ("shirts", "เสื้อ", "Shirts", ["ShirtAccessory"], []),
@@ -240,13 +240,9 @@ INV_MAINS = [
         ("gear", "Gear", "Gear", ["Gear"], []),
     ]),
     ("backgrounds", "พื้นหลัง", "Backgrounds", [("", "", "", ["AvatarBackground"], [])]),
-    ("animations", "แอนิเมชัน", "Animations", [
-        ("packs", "ชุดท่าเดิน", "Bundles", [], ["Animations", "AvatarAnimations"]),
-        ("idle", "ยืน", "Idle", ["IdleAnimation"], []), ("walk", "เดิน", "Walk", ["WalkAnimation"], []),
-        ("run", "วิ่ง", "Run", ["RunAnimation"], []), ("jump", "กระโดด", "Jump", ["JumpAnimation"], []),
-        ("fall", "ตก", "Fall", ["FallAnimation"], []), ("climb", "ปีน", "Climb", ["ClimbAnimation"], []),
-        ("swim", "ว่ายน้ำ", "Swim", ["SwimAnimation"], []),
-    ]),
+    # แอนิเมชัน = ชุดท่าเดิน (bundle ใบเดียว) + ท่าเดี่ยวที่ไม่ได้อยู่ใน bundle · ไม่มีหมวดย่อย (เหมือนร้าน)
+    ("animations", "แอนิเมชัน", "Animations", [("", "", "", ["IdleAnimation", "WalkAnimation", "RunAnimation", "JumpAnimation",
+        "FallAnimation", "ClimbAnimation", "SwimAnimation"], ["Animations", "AvatarAnimations"])]),
     ("emotes", "อีโมต", "Emotes", [("", "", "", ["EmoteAnimation"], [])]),
     ("makeup", "แต่งหน้า", "Makeup", [
         ("eyes", "ตา", "Eyes", ["EyeMakeup"], []), ("lips", "ปาก", "Lips", ["LipMakeup"], []),

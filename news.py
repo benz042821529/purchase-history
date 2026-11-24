@@ -151,3 +151,80 @@ def get_news():
             data["status"] = old.get("status") or {"overall": 0, "items": [], "incidents": [], "maintenance": []}
         _cache["data"], _cache["t"] = data, time.time()
         return data
+
+
+# ---------------- (2026-11-24) เนื้อหาเต็มของข่าว (โพสต์แรกของหัวข้อ) ----------------
+# GET /api/news/post?id=  → { id, text, text_th }  ข้อความล้วน แบ่งย่อหน้าด้วยบรรทัดว่าง · แปลไทยทีละย่อหน้า
+# รับเฉพาะ id ที่อยู่ในรายการข่าวตอนนี้ (กันใช้เว็บเป็นตัวดึงหน้าอื่น) · จำไว้ 6 ชม.
+POST_TTL = 6 * 3600
+POST_MAX = 3500
+_post_cache = {}
+
+
+def _html_to_text(h):
+    h = h or ""
+    h = re.sub(r"(?is)<(script|style)[^>]*>.*?</\1>", "", h)
+    h = re.sub(r"(?is)<div class=\"lightbox-wrapper\".*?</div>", "", h)
+    h = re.sub(r"(?is)<img[^>]*>", "", h)
+    h = re.sub(r"(?i)<br\s*/?>", "\n", h)
+    h = re.sub(r"(?i)<li[^>]*>", "\n• ", h)
+    h = re.sub(r"(?i)</(p|h[1-6]|li|div|blockquote|pre|tr|ul|ol|table)>", "\n\n", h)
+    h = re.sub(r"<[^>]+>", "", h)
+    h = html.unescape(h)
+    lines = [re.sub(r"[ \t\u00a0]+", " ", ln).strip() for ln in h.split("\n")]
+    out, blank = [], False
+    for ln in lines:
+        if not ln:
+            blank = True
+            continue
+        if out and blank and not ln.startswith("•"):
+            out.append("")
+        out.append(ln)
+        blank = False
+    return "\n".join(out).strip()
+
+
+def _translate_paras(paras):
+    """แปลทีละชุด (ไม่เกิน ~1500 ตัวอักษร/ครั้ง) แปลไม่ได้ = ใช้ภาษาอังกฤษเดิม"""
+    res, batch, size = [], [], 0
+    def flush():
+        nonlocal batch, size
+        if batch:
+            th = _translate_many(batch)
+            res.extend(t or b for t, b in zip(th, batch))
+        batch, size = [], 0
+    for p in paras:
+        if size + len(p) > 1500:
+            flush()
+        batch.append(p); size += len(p) + 1
+    flush()
+    return res
+
+
+def get_post(pid):
+    try:
+        pid = int(pid)
+    except Exception:
+        raise ValueError("bad id")
+    c = _post_cache.get(pid)
+    if c and time.time() - c[0] < POST_TTL:
+        return c[1]
+    data = _cache.get("data") or get_news()
+    if not any(n.get("id") == pid for n in (data.get("news") or [])):
+        raise ValueError("unknown id")
+    d = _get(f"https://devforum.roblox.com/t/{pid}.json", timeout=15)
+    posts = ((d.get("post_stream") or {}).get("posts")) or []
+    text = _html_to_text(posts[0].get("cooked") if posts else "")
+    if len(text) > POST_MAX:
+        cut = text.rfind("\n", 0, POST_MAX)
+        text = text[: cut if cut > POST_MAX // 2 else POST_MAX].rstrip() + "\n…"
+    paras = text.split("\n")
+    keep = [p for p in paras if p.strip()]
+    th_map = dict(zip(keep, _translate_paras(keep)))
+    text_th = "\n".join(th_map.get(p, p) if p.strip() else "" for p in paras)
+    out = {"id": pid, "text": text, "text_th": text_th}
+    _post_cache[pid] = (time.time(), out)
+    if len(_post_cache) > 60:
+        for k in sorted(_post_cache, key=lambda k: _post_cache[k][0])[:20]:
+            _post_cache.pop(k, None)
+    return out

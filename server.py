@@ -2203,6 +2203,17 @@ class Handler(BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b)
             return
+        if parsed.path == "/api/news/post":  # (2026-11-24) เนื้อหาเต็มของข่าว 1 หัวข้อ
+            if not FO.rate_ok(self._client_ip()):
+                self._json(429, {"message": "too many requests"}); return
+            try:
+                q = urllib.parse.parse_qs(parsed.query)
+                self._json(200, NEWS.get_post((q.get("id") or [""])[0]))
+            except ValueError as e:
+                self._json(400, {"message": str(e)})
+            except Exception as e:
+                self._json(500, {"message": str(e)})
+            return
         if parsed.path == "/api/news":
             if not FO.rate_ok(self._client_ip()):
                 self._json(429, {"message": "too many requests"}); return

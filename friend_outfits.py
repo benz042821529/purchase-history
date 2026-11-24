@@ -794,7 +794,14 @@ function applyLang(){
 document.querySelectorAll('.lang button').forEach(b=>b.onclick=()=>{L=b.dataset.l;try{localStorage.setItem('fo_lang',L)}catch(e){};applyLang()});
 
 async function api(path,opt){
-  const r=await fetch(path,opt); let j={};
+  // (2026-11-24) กันค้าง "กำลังโหลด..." ตลอด: หมดเวลา 45 วิ แล้วลองใหม่อัตโนมัติ 1 ครั้ง
+  let r=null;
+  for(let a=0;a<2&&!r;a++){
+    const ac=new AbortController(), tm=setTimeout(()=>ac.abort(),45000);
+    try{r=await fetch(path,Object.assign({},opt||{},{signal:ac.signal}))}catch(e){if(a===1) throw new Error(t('fail'))}
+    finally{clearTimeout(tm)}
+  }
+  let j={};
   try{j=await r.json()}catch(e){}
   if(!r.ok) throw new Error(j.message||t('fail'));
   return j;

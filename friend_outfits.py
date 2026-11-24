@@ -214,6 +214,72 @@ def _assets_to_items(assets):
         out.append(_item(aid, (a.get("assetType") or {}).get("name", ""), a.get("name", "")))
     return out
 
+# ---------------- รวมชิ้นส่วนเป็น Bundle (2026-11-24) ----------------
+# ชิ้นส่วนร่างกาย / ท่าเดิน / รองเท้า ซื้อแยกไม่ได้ → ถาม catalog ว่าชิ้นนี้อยู่ใน bundle ไหน แล้วยุบชิ้นที่อยู่ bundle เดียวกันเป็นแถวเดียว
+PIECE_TYPES = {"Head", "Torso", "LeftArm", "RightArm", "LeftLeg", "RightLeg", "DynamicHead", "MoodAnimation",
+               "IdleAnimation", "WalkAnimation", "RunAnimation", "JumpAnimation", "FallAnimation", "ClimbAnimation",
+               "SwimAnimation", "LeftShoeAccessory", "RightShoeAccessory"}
+BUNDLE_CAT = {"BodyParts": "body", "DynamicHead": "face", "DynamicHeadAvatar": "body", "Animations": "anim", "Shoes": "shoes"}
+
+def _bundles_of(aid):
+    def go():
+        try:
+            d = _req(f"https://catalog.roblox.com/v1/assets/{aid}/bundles?limit=10&sortOrder=Asc")
+        except Exception as e:
+            print(f"[fo bundles {aid}] {e}")
+            return []
+        out = []
+        for b in d.get("data", []):
+            ids = [it.get("id") for it in b.get("items", []) if it.get("type") == "Asset"]
+            out.append({"id": b.get("id"), "name": b.get("name", ""), "type": b.get("bundleType", ""), "items": ids})
+        return out
+    return _cached(("abundles", aid), 86400, go)
+
+def merge_bundles(items):
+    pieces = [it for it in items if it.get("type") in PIECE_TYPES]
+    if not pieces:
+        return items
+    with ThreadPoolExecutor(max_workers=6) as ex:
+        found = dict(zip([p["id"] for p in pieces], ex.map(_bundles_of, [p["id"] for p in pieces])))
+    have = {p["id"] for p in pieces}
+    cand = {}
+    for pid, bl in found.items():
+        for b in bl:
+            if b.get("id"):
+                c = cand.setdefault(b["id"], dict(b, cover=set()))
+                c["cover"] |= {i for i in b["items"] if i in have}
+    used, chosen = set(), []
+    while True:
+        best = None
+        for b in cand.values():
+            left = b["cover"] - used
+            if not left:
+                continue
+            # bundle เดียวที่ชิ้นนั้นอยู่ หรือคลุมได้ตั้งแต่ 2 ชิ้น
+            ok = len(left) >= 2 or any(len(found.get(i, [])) == 1 for i in left)
+            if ok and (best is None or len(left) > len(best[1])):
+                best = (b, left)
+        if not best:
+            break
+        used |= best[1]
+        chosen.append(best)
+    if not chosen:
+        return items
+    out, placed = [], set()
+    first_of = {}
+    for b, left in chosen:
+        for i in left:
+            first_of[i] = b
+    for it in items:
+        b = first_of.get(it["id"])
+        if b is None:
+            out.append(it)
+        elif b["id"] not in placed:
+            placed.add(b["id"])
+            out.append({"id": b["id"], "key": "b" + str(b["id"]), "bundle": True, "type": b["type"],
+                        "cat": BUNDLE_CAT.get(b["type"], "body"), "name": b["name"], "pieces": len([i for i in first_of if first_of[i] is b])})
+    return out
+
 # ---------------- ชุดของคนหนึ่งคน ----------------
 def _roblox_outfits(uid):
     """ชุดที่สร้างเก็บในบัญชี Roblox ทุกหน้า (ไม่ใช่แค่ 50 ชุดแรก) — สูงสุด 12 หน้า"""
@@ -277,6 +343,7 @@ def _map_outfits(uid):
             add(aid, "DynamicHead" if part == "Head" else part)
         for field, aid in (e.get("animations") or {}).items():
             add(aid, field)
+        items = merge_bundles(items)
         out.append({
             "code": e.get("code", ""), "name": e.get("name") or e.get("outfitName") or e.get("code") or "",
             "savedAt": e.get("savedAt") or e.get("createdAt") or e.get("ts") or 0, "items": items,
@@ -299,7 +366,7 @@ def person(uid):
                 print(f"[fo avatar {uid}] {e}"); av = {}
             ro, ro_err = f_ro.result()
             mp, mp_err = f_mp.result()
-        wearing = _assets_to_items(av.get("assets"))
+        wearing = merge_bundles(_assets_to_items(av.get("assets")))
         for e in av.get("emotes") or []:
             if e.get("assetId"):
                 wearing.append(_item(e["assetId"], "EmoteAnimation", e.get("assetName", "")))
@@ -327,13 +394,22 @@ def outfit(oid):
             d = _req(f"https://avatar.roblox.com/v1/outfits/{oid}/details")
         except urllib.error.HTTPError as e:
             raise FoError(404 if e.code in (400, 404) else 502, "เปิดชุดนี้ไม่ได้ (อาจถูกลบไปแล้ว)")
-        return {"id": oid, "name": d.get("name", ""), "items": _assets_to_items(d.get("assets"))}
+        return {"id": oid, "name": d.get("name", ""), "items": merge_bundles(_assets_to_items(d.get("assets")))}
     return _cached(("outfit", oid), 600, go)
 
 def items(ids):
-    ids = [int(i) for i in ids if str(i).isdigit()][:80]
-    det = _h["fetch_item_details"]([{"id": i, "tp": "A"} for i in ids])
-    return {str(i): det.get(f"A_{i}", {}) for i in ids}
+    keys = [str(i) for i in ids][:80]
+    req, back = [], {}
+    for k in keys:
+        if k.startswith("b") and k[1:].isdigit():
+            req.append({"id": int(k[1:]), "tp": "B"}); back[k] = f"B_{k[1:]}"
+        elif k.isdigit():
+            req.append({"id": int(k), "tp": "A"}); back[k] = f"A_{k}"
+    det = _h["fetch_item_details"](req)
+    return {k: det.get(v, {}) for k, v in back.items()}
+
+def merge_map(idx_items):
+    return merge_bundles(idx_items)
 
 # ---------------- เส้นทาง ----------------
 def handle_get(path, query):
@@ -511,8 +587,9 @@ const UI0={sort:'def',grp:true,view:'grid',size:1};
 let ui=(()=>{try{return Object.assign({},UI0,JSON.parse(localStorage.getItem('fo_ui')||'{}'))}catch(e){return Object.assign({},UI0)}})();
 function saveUi(){try{localStorage.setItem('fo_ui',JSON.stringify(ui))}catch(e){}}
 function applySize(){document.body.style.setProperty('--isz',SIZES.i[ui.size]+'px');document.body.style.setProperty('--osz',SIZES.o[ui.size]+'px');document.body.style.setProperty('--rsz',SIZES.r[ui.size]+'px');document.querySelectorAll('[data-z]').forEach(b=>b.disabled=(b.dataset.z==='-1'&&ui.size===0)||(b.dataset.z==='1'&&ui.size===3))}
-const prOf=it=>(itemCache[it.id]||{}).price||0;
-const nmOf=it=>String((itemCache[it.id]||{}).name||it.name||'').toLowerCase();
+const kOf=it=>String(it.key||it.id);
+const prOf=it=>(itemCache[kOf(it)]||{}).price||0;
+const nmOf=it=>String((itemCache[kOf(it)]||{}).name||it.name||'').toLowerCase();
 function sortBy(list,kind,nameFn){
   const a=list.slice(), s=ui.sort;
   if(kind==='items'&&s==='pd') a.sort((x,y)=>prOf(y)-prOf(x));
@@ -567,10 +644,10 @@ async function fillItems(ids){
   }
 }
 function itemCard(it){
-  const d=itemCache[it.id]||{};
-  const nm=d.name||it.name||('#'+it.id);
+  const d=itemCache[kOf(it)]||{};
+  const nm=(it.bundle?'📦 ':'')+(d.name||it.name||('#'+it.id));
   const th=d.thumb?'<img loading="lazy" src="'+esc(d.thumb)+'" alt="">':'';
-  const href='https://www.roblox.com/catalog/'+it.id;
+  const href=it.bundle?'https://www.roblox.com/bundles/'+it.id:'https://www.roblox.com/catalog/'+it.id;
   const by=d.creator?'<div class="by">'+esc(t('by'))+' '+esc(d.creator)+'</div>':'';
   const tip=esc(nm+(d.creator?' — '+t('by')+' '+d.creator:''));
   if(ui.view==='list') return '<a class="rowi" href="'+href+'" target="_blank" rel="noopener" title="'+tip+'"><div class="th">'+th+'</div><div class="n">'+esc(nm)+' <span>· '+esc(T[L].cats[it.cat])+(d.creator?' · '+esc(t('by'))+' '+esc(d.creator):'')+'</span></div>'+priceHtml(d)+'</a>';
@@ -589,7 +666,7 @@ function itemsHtml(items){
   return h;
 }
 function totalHtml(items){
-  let sum=0;items.forEach(it=>{const d=itemCache[it.id];if(d&&d.price>0)sum+=d.price});
+  let sum=0;items.forEach(it=>{const d=itemCache[kOf(it)];if(d&&d.price>0)sum+=d.price});
   return '<div class="total">'+items.length+' '+t('items')+(sum?' · '+t('total')+' <b>R$ '+sum.toLocaleString()+'</b>':'')+'</div>';
 }
 
@@ -611,7 +688,7 @@ async function openPerson(uid){
   try{
     person=await api('/api/fo/person?uid='+uid);
     tab='wearing'; shown=60; renderPerson();
-    await fillItems(person.wearing.map(i=>i.id)); if(tab==='wearing') renderPerson();
+    await fillItems(person.wearing.map(kOf)); if(tab==='wearing') renderPerson();
     retryThumbs();
   }catch(e){out.innerHTML='<div class="msg err">'+esc(e.message)+'</div>'}
 }
@@ -642,7 +719,7 @@ function renderPerson(){
       const order=sortBy(p.mapOutfits.map((o,i)=>Object.assign({i},o)),'map',o=>String(o.name||o.code||'').toLowerCase());
       h+=barHtml('map',nM+' '+t('outfits'));
       h+='<div class="'+(ui.view==='list'?'rows':'grid')+'">'+order.map(o=>{
-        const imgs=o.items.filter(x=>['hair','head','top','bottom','acc','face','shoes'].includes(x.cat)).slice(0,4).map(x=>(itemCache[x.id]||{}).thumb).filter(Boolean);
+        const imgs=o.items.filter(x=>['hair','head','top','bottom','acc','face','shoes'].includes(x.cat)).slice(0,4).map(x=>(itemCache[kOf(x)]||{}).thumb).filter(Boolean);
         const date=o.savedAt?new Date(o.savedAt*1000).toLocaleDateString(L==='th'?'th-TH':'en-GB'):'';
         const sub=t('code')+' '+esc(o.code)+' · '+o.items.length+' '+t('items')+(date?' · '+date:'');
         if(ui.view==='list') return '<div class="rowi" data-m="'+o.i+'"><div class="th">'+(imgs[0]?'<img src="'+esc(imgs[0])+'" alt="">':'')+'</div><div class="n">'+esc(o.name||o.code)+' <span>· '+sub+'</span></div></div>';
@@ -652,7 +729,7 @@ function renderPerson(){
   out.innerHTML=h;
   bindBar(out,renderPerson);
   out.querySelectorAll('.tab').forEach(b=>b.onclick=async()=>{tab=b.dataset.t;renderPerson();
-    if(tab==='map'&&p.mapOutfits.length){await fillItems([].concat(...p.mapOutfits.map(o=>o.items.slice(0,8).map(x=>x.id))));if(tab==='map')renderPerson()}});
+    if(tab==='map'&&p.mapOutfits.length){await fillItems([].concat(...p.mapOutfits.map(o=>o.items.slice(0,8).map(kOf))));if(tab==='map')renderPerson()}});
   const more=$('#more'); if(more) more.onclick=()=>{shown+=60;renderPerson();retryThumbs()};
   out.querySelectorAll('[data-o]').forEach(e=>e.onclick=()=>openOutfit(e.dataset.o));
   out.querySelectorAll('[data-m]').forEach(e=>e.onclick=()=>openMap(+e.dataset.m));
@@ -677,7 +754,7 @@ async function openOutfit(id){
   showModal(o.name||'',' <div class="msg">'+t('loading')+'</div>');
   try{
     const d=await api('/api/fo/outfit?id='+id);
-    await fillItems(d.items.map(i=>i.id));
+    await fillItems(d.items.map(kOf));
     const draw=()=>{showModal(o.name||d.name,'<div class="wear"><div class="avatar">'+(o.img?'<img src="'+esc(o.img)+'" alt="">':'')+'<div class="sum">'+totalHtml(d.items)+'</div></div><div>'+barHtml('items')+itemsHtml(d.items)+'</div></div>');bindBar(mb,()=>{draw();renderPerson()})};
     draw();
   }catch(e){showModal(o.name||'','<div class="msg err">'+esc(e.message)+'</div>')}
@@ -685,7 +762,7 @@ async function openOutfit(id){
 async function openMap(i){
   const o=person.mapOutfits[i];
   showModal((o.name||o.code)+' · '+t('code')+' '+o.code,'<div class="msg">'+t('loading')+'</div>');
-  await fillItems(o.items.map(x=>x.id));
+  await fillItems(o.items.map(kOf));
   const draw=()=>{showModal((o.name||o.code)+' · '+t('code')+' '+o.code,totalHtml(o.items)+barHtml('items')+itemsHtml(o.items));bindBar(mb,()=>{draw();renderPerson()})};
   draw();
 }

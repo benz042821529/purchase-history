@@ -432,14 +432,16 @@ def person(uid):
         if not info:
             raise FoError(404, "ไม่เจอผู้เล่นนี้")
         with ThreadPoolExecutor(max_workers=3) as ex:
-            f_av = ex.submit(lambda: _req(f"https://avatar.roblox.com/v1/users/{uid}/avatar"))
+            f_av = ex.submit(_avatar, uid)
             f_ro = ex.submit(_roblox_outfits, uid)
             try:
                 av = f_av.result()
             except Exception as e:
-                print(f"[fo avatar {uid}] {e}"); av = {}
+                print(f"[fo avatar {uid}] {e}"); av = None
             ro, ro_err = f_ro.result()
             mp, mp_err = [], None  # (2026-11-24) เอาชุดที่เซฟในแมพออกจากหน้าเว็บ (ผู้ใช้ขอ)
+        av_err = av is None
+        av = av or {}
         wearing = merge_bundles(_assets_to_items(av.get("assets")))
         for e in av.get("emotes") or []:
             if e.get("assetId"):
@@ -458,9 +460,29 @@ def person(uid):
             "head": th_hd.get(uid, ""), "avatarImg": th_av.get(uid, ""),
             "wearing": wearing, "avatarType": av.get("playerAvatarType", ""),
             "robloxOutfits": ro, "robloxErr": None if ro else ro_err, "robloxPrivate": private,
-            "mapOutfits": mp, "mapErr": mp_err,
+            "mapOutfits": mp, "mapErr": mp_err, "wearErr": av_err,
         }
-    return _cached(("person", uid), 180, go)
+    # (2026-11-24) ถ้าดึงชุดที่ใส่อยู่ไม่สำเร็จ อย่าจำผลว่างไว้ — ครั้งหน้าดึงใหม่
+    v = _h["cache_get"](("fo", "person", uid), 180)
+    if v is not None:
+        return v
+    v = go()
+    if not v.get("wearErr"):
+        _h["cache_set"](("fo", "person", uid), v)
+    return v
+
+def _avatar(uid):
+    """ชุดที่ใส่อยู่: ลอง v1 ก่อน ไม่ได้ลอง v2 (Roblox ทยอยเลิก v1)"""
+    last = None
+    for url in (f"https://avatar.roblox.com/v1/users/{uid}/avatar",
+                f"https://avatar.roblox.com/v2/avatar/users/{uid}/avatar"):
+        try:
+            d = _req(url)
+            if isinstance(d, dict) and "assets" in d:
+                return d
+        except Exception as e:
+            last = e
+    raise last or FoError(502, "avatar")
 
 def outfit(oid):
     def go():
@@ -479,12 +501,19 @@ def items(ids):
             req.append({"id": int(k[1:]), "tp": "B"}); back[k] = f"B_{k[1:]}"
         elif k.isdigit():
             req.append({"id": int(k), "tp": "A"}); back[k] = f"A_{k}"
-    det = _h["fetch_item_details"](req)
+    # (2026-11-24) ดึงรายละเอียด + สถานะการขาย พร้อมกัน (เดิมทำทีละอย่าง = ช้าเท่าตัว)
+    with ThreadPoolExecutor(max_workers=2) as ex:
+        f_st = ex.submit(_sale_status, req)
+        det = _h["fetch_item_details"](req)
+        try:
+            st_pre = f_st.result()
+        except Exception as e:
+            print(f"[fo sale status] {e}"); st_pre = {}
     out = {k: dict(det.get(v, {})) for k, v in back.items()}
     # (2026-11-24) ราคาให้ตรงความจริง: ของลิมิเต็ด/ของที่เลิกขาย Roblox ยังส่ง "ราคาเดิม" มา
     # → ลิมิเต็ดที่ซื้อจาก Roblox ไม่ได้แล้ว ใช้ราคาขายต่อถูกสุด (resale) · ของที่เลิกขาย = offsale
     try:
-        st = _sale_status(req)
+        st = st_pre
         for k, v in back.items():
             s2 = st.get(v)
             if not s2: continue
@@ -778,7 +807,7 @@ const T={
   items:'ชิ้น',total:'ราคารวมชิ้นที่ยังขาย',free:'ฟรี',off:'ไม่ขาย',profile:'โปรไฟล์ Roblox',showMore:'แสดงเพิ่ม',
   noRoblox:'ไม่มีชุดที่สร้างเก็บไว้ใน Roblox',priv:'🔒 เจ้าตัวปิดการดูไอเทม/ชุดไว้ ดูได้แค่ชุดที่ใส่อยู่',
   noMap:'ยังไม่เคยเซฟชุดในแมพ',inv:'ไอเทมทั้งหมด',invPriv:'🔒 เจ้าตัวปิดการดูคลังไอเทมไว้ เลยดูไอเทมทั้งหมดไม่ได้',invEmpty:'ไม่มีไอเทมในหมวดนี้',invHint:'ไอเทมที่อยู่ในคลังของคนนี้ เรียงจากที่ได้มาล่าสุด',invHid:'ซ่อนชิ้นส่วนที่อยู่ในชุดเซ็ตแล้ว',mapPerm:'ยังเปิดดูชุดในแมพไม่ได้ (ต้องเพิ่มสิทธิ์ API key ให้อ่าน DataStore PlayerOutfitCodes_v1)',
-  code:'โค้ด',saved:'เซฟเมื่อ',sDef:'ค่าเริ่มต้น',by:'โดย',sNew:'ล่าสุด',sPd:'ราคา ↓',sPa:'ราคา ↑',sNa:'ชื่อ ก-ฮ',sNz:'ชื่อ ฮ-ก',grp:'แยกหมวด',resale:'ขายต่อ',resaleTip:'ลิมิเต็ด ซื้อจาก Roblox ไม่ได้แล้ว ราคานี้คือราคาขายต่อที่ถูกที่สุด',offsale:'ไม่วางขาย',flat:'รวม',grid:'ตาราง',list:'รายการ',smaller:'เล็กลง',bigger:'ใหญ่ขึ้น',outfits:'ชุด',fail:'โหลดไม่สำเร็จ ลองใหม่อีกครั้ง',back:'ค้นหาใหม่',
+  code:'โค้ด',saved:'เซฟเมื่อ',sDef:'ค่าเริ่มต้น',by:'โดย',sNew:'ล่าสุด',sPd:'ราคา ↓',sPa:'ราคา ↑',sNa:'ชื่อ ก-ฮ',sNz:'ชื่อ ฮ-ก',grp:'แยกหมวด',wearErr:'ดึงชุดที่ใส่อยู่ไม่สำเร็จ (Roblox ตอบช้า) กดค้นหาอีกครั้ง',resale:'ขายต่อ',resaleTip:'ลิมิเต็ด ซื้อจาก Roblox ไม่ได้แล้ว ราคานี้คือราคาขายต่อที่ถูกที่สุด',offsale:'ไม่วางขาย',flat:'รวม',grid:'ตาราง',list:'รายการ',smaller:'เล็กลง',bigger:'ใหญ่ขึ้น',outfits:'ชุด',fail:'โหลดไม่สำเร็จ ลองใหม่อีกครั้ง',back:'ค้นหาใหม่',
   foot:'ข้อมูลจาก Roblox (สาธารณะ)',
   cats:{bundle:'ชุดเซ็ต (Bundle)',hair:'ผม',head:'หมวก / หัว',face:'หน้า',top:'เสื้อ',bottom:'กางเกง / กระโปรง',shoes:'รองเท้า',acc:'เครื่องประดับ',body:'ร่างกาย',anim:'ท่าเดิน / ท่าทาง',emote:'อีโมต',other:'อื่นๆ'}},
  en:{ttl:'👕 Roblox Outfit Viewer',sub:"Type an ID or username → see what they're wearing, all their items and their saved Roblox outfits",ph:'ID / @username',go:'Search',
@@ -786,7 +815,7 @@ const T={
   items:'items',total:'Total for items still on sale',free:'Free',off:'Off sale',profile:'Roblox profile',showMore:'Show more',
   noRoblox:'No outfits saved on their Roblox account',priv:'🔒 This player hides their inventory — only the current outfit is visible',
   noMap:'No outfits saved in the map yet',inv:'All items',invPriv:'🔒 This player hides their inventory, so their items can\'t be shown',invEmpty:'No items in this category',invHint:'Items in this player\'s inventory, newest first',invHid:'pieces already shown under Bundles were hidden',mapPerm:'Map outfits not available yet (the API key needs read access to DataStore PlayerOutfitCodes_v1)',
-  code:'Code',saved:'Saved',sDef:'Default',by:'by',sNew:'Newest',sPd:'Price ↓',sPa:'Price ↑',sNa:'Name A-Z',sNz:'Name Z-A',grp:'By category',resale:'resale',resaleTip:'Limited — no longer sold by Roblox; lowest resale price',offsale:'Off sale',flat:'All together',grid:'Grid',list:'List',smaller:'Smaller',bigger:'Bigger',outfits:'outfits',fail:'Could not load — please try again',back:'New search',
+  code:'Code',saved:'Saved',sDef:'Default',by:'by',sNew:'Newest',sPd:'Price ↓',sPa:'Price ↑',sNa:'Name A-Z',sNz:'Name Z-A',grp:'By category',wearErr:'Could not load what they\'re wearing (Roblox is slow) — search again',resale:'resale',resaleTip:'Limited — no longer sold by Roblox; lowest resale price',offsale:'Off sale',flat:'All together',grid:'Grid',list:'List',smaller:'Smaller',bigger:'Bigger',outfits:'outfits',fail:'Could not load — please try again',back:'New search',
   foot:'Data from Roblox (public)',
   cats:{bundle:'Bundles',hair:'Hair',head:'Hats / Head',face:'Face',top:'Tops',bottom:'Bottoms',shoes:'Shoes',acc:'Accessories',body:'Body',anim:'Animations',emote:'Emotes',other:'Other'}}
 };
@@ -930,7 +959,7 @@ function renderPerson(){
   h+='<div class="tabs">'+[['wearing',t('wearing')+' ('+p.wearing.length+')'],['inv',t('inv')+(p.robloxPrivate?' 🔒':'')],['roblox',t('roblox')+' ('+(p.robloxPrivate?'🔒':nR)+')']]
     .map(([k,l])=>'<button class="tab'+(tab===k?' on':'')+'" data-t="'+k+'">'+esc(l)+'</button>').join('')+'</div>';
   if(tab==='wearing'){
-    h+='<div class="wear"><div class="avatar">'+(p.avatarImg?'<img src="'+esc(p.avatarImg)+'" alt="">':'')+'<div class="sum">'+totalHtml(p.wearing)+'</div></div><div>'+barHtml('items')+itemsHtml(p.wearing)+'</div></div>';
+    h+='<div class="wear"><div class="avatar">'+(p.avatarImg?'<img src="'+esc(p.avatarImg)+'" alt="">':'')+'<div class="sum">'+totalHtml(p.wearing)+'</div></div><div>'+(p.wearErr?'<p class="msg">'+esc(t('wearErr'))+'</p>':barHtml('items')+itemsHtml(p.wearing))+'</div></div>';
   }else if(tab==='inv'){
     const st=inv[invCat], mainK=invCat.split('.')[0], main=INVMETA.mains.find(m=>m.k===mainK)||INVMETA.mains[0];
     const cnt=c=>{const x=inv[c];return x&&x.items?' ('+x.items.length+(x.next?'+':'')+')':''};

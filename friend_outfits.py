@@ -203,8 +203,59 @@ ACC_TYPE = {
     "Eyelash": "EyelashAccessory",
 }
 
+# ---------------- (2026-11-24) หมวดหลัก → หมวดย่อย แบบหน้า Inventory ของ Roblox (ใช้ทั้งเว็บและในเกม) ----------------
+# key หมวดย่อย = "<หลัก>.<ย่อย>" · key หมวดหลักเฉยๆ = ทั้งหมดในหมวดนั้น
+INV_MAINS = [
+    ("bundle", "ชุดเซ็ต", "Bundles", [
+        ("char", "ตัวละคร", "Characters", ["BodyParts", "DynamicHead", "DynamicHeadAvatar"]),
+        ("anim", "ชุดท่าเดิน", "Animation packs", ["Animations", "AvatarAnimations"]),
+        ("shoes", "รองเท้า", "Shoes", ["Shoes"]),
+    ]),
+    ("acc", "เครื่องประดับ", "Accessories", [
+        ("hat", "หมวก", "Hats", ["Hat"]), ("hair", "ผม", "Hair", ["HairAccessory"]),
+        ("face", "หน้า", "Face", ["FaceAccessory"]), ("neck", "คอ", "Neck", ["NeckAccessory"]),
+        ("shoulder", "ไหล่", "Shoulder", ["ShoulderAccessory"]), ("front", "ด้านหน้า", "Front", ["FrontAccessory"]),
+        ("back", "ด้านหลัง", "Back", ["BackAccessory"]), ("waist", "เอว", "Waist", ["WaistAccessory"]),
+        ("gear", "Gear", "Gear", ["Gear"]),
+    ]),
+    ("cloth", "เสื้อผ้า", "Clothing", [
+        ("tshirt3d", "เสื้อยืด", "T-Shirts", ["TShirtAccessory"]), ("shirt3d", "เสื้อ", "Shirts", ["ShirtAccessory"]),
+        ("jacket", "แจ็กเก็ต", "Jackets", ["JacketAccessory"]), ("sweater", "สเวตเตอร์", "Sweaters", ["SweaterAccessory"]),
+        ("pants3d", "กางเกง", "Pants", ["PantsAccessory"]), ("shorts", "กางเกงขาสั้น", "Shorts", ["ShortsAccessory"]),
+        ("dress", "เดรส / กระโปรง", "Dresses & Skirts", ["DressSkirtAccessory"]),
+        ("shoes", "รองเท้า", "Shoes", ["LeftShoeAccessory", "RightShoeAccessory"]),
+        ("shirt", "เสื้อ 2D", "Classic Shirts", ["Shirt"]), ("tshirt", "เสื้อยืด 2D", "Classic T-Shirts", ["TShirt"]),
+        ("pants", "กางเกง 2D", "Classic Pants", ["Pants"]),
+    ]),
+    ("body", "ร่างกาย", "Body", [
+        ("head", "หัว", "Heads", ["DynamicHead", "Head"]), ("face", "หน้า", "Faces", ["Face"]),
+        ("brow", "คิ้ว", "Eyebrows", ["EyebrowAccessory"]), ("lash", "ขนตา", "Eyelashes", ["EyelashAccessory"]),
+        ("torso", "ลำตัว", "Torsos", ["Torso"]), ("arms", "แขน", "Arms", ["LeftArm", "RightArm"]),
+        ("legs", "ขา", "Legs", ["LeftLeg", "RightLeg"]), ("mood", "สีหน้า", "Moods", ["MoodAnimation"]),
+    ]),
+    ("anim", "ท่าทาง", "Animations", [
+        ("emote", "อีโมต", "Emotes", ["EmoteAnimation"]), ("idle", "ยืน", "Idle", ["IdleAnimation"]),
+        ("walk", "เดิน", "Walk", ["WalkAnimation"]), ("run", "วิ่ง", "Run", ["RunAnimation"]),
+        ("jump", "กระโดด", "Jump", ["JumpAnimation"]), ("fall", "ตก", "Fall", ["FallAnimation"]),
+        ("climb", "ปีน", "Climb", ["ClimbAnimation"]), ("swim", "ว่ายน้ำ", "Swim", ["SwimAnimation"]),
+    ]),
+]
+INV_KEYS = {}      # key → (main, [types])
+TYPE_SUB = {}      # assetType → key หมวดย่อย
+BUNDLE_SUB = {}    # bundleType → key หมวดย่อย
+for _m, _th, _en, _subs in INV_MAINS:
+    INV_KEYS[_m] = (_m, [t for _s in _subs for t in _s[3]])
+    for _k, _sth, _sen, _types in _subs:
+        INV_KEYS[f"{_m}.{_k}"] = (_m, _types)
+        for _t in _types:
+            if _m == "bundle": BUNDLE_SUB.setdefault(_t, f"{_m}.{_k}")
+            else: TYPE_SUB.setdefault(_t, f"{_m}.{_k}")
+INV_META = {"mains": [{"k": m, "th": th, "en": en, "subs": [{"k": f"{m}.{k}", "th": sth, "en": sen} for k, sth, sen, _ in subs]}
+                      for m, th, en, subs in INV_MAINS]}
+
 def _item(aid, atype, name=""):
-    return {"id": int(aid), "type": atype or "", "cat": TYPE_CAT.get(atype or "", "other"), "name": name or ""}
+    return {"id": int(aid), "type": atype or "", "cat": TYPE_CAT.get(atype or "", "other"),
+            "sub": TYPE_SUB.get(atype or "", "other"), "name": name or ""}
 
 def _assets_to_items(assets):
     out, seen = [], set()
@@ -290,7 +341,7 @@ def merge_bundles(items):
             out.append(it)
         elif b["id"] not in placed:
             placed.add(b["id"])
-            out.append({"id": b["id"], "key": "b" + str(b["id"]), "bundle": True, "type": b["type"],
+            out.append({"id": b["id"], "key": "b" + str(b["id"]), "bundle": True, "type": b["type"], "sub": BUNDLE_SUB.get(b["type"], "bundle"),
                         "cat": BUNDLE_CAT.get(b["type"], "bundle"), "name": b["name"], "pieces": len([i for i in first_of if first_of[i] is b])})
     return out
 
@@ -427,21 +478,6 @@ def merge_map(idx_items):
 
 # ---------------- (2026-11-24) ไอเทมทั้งหมดที่ผู้เล่นมี (คลัง) แยกหมวด ----------------
 # GET /api/fo/inv?uid=&cat=&cursor=  → { items, next, private }  ทีละ 100 ชิ้น · คลังส่วนตัว = private: true
-INV_TYPES = {
-    "hair":   ["HairAccessory"],
-    "head":   ["Hat"],
-    "face":   ["Face", "FaceAccessory", "EyebrowAccessory", "EyelashAccessory"],
-    "top":    ["Shirt", "TShirt", "TShirtAccessory", "ShirtAccessory", "JacketAccessory", "SweaterAccessory"],
-    "bottom": ["Pants", "PantsAccessory", "ShortsAccessory", "DressSkirtAccessory"],
-    "shoes":  ["LeftShoeAccessory", "RightShoeAccessory"],
-    "acc":    ["NeckAccessory", "ShoulderAccessory", "FrontAccessory", "BackAccessory", "WaistAccessory", "Gear"],
-    "body":   ["DynamicHead", "Head", "Torso", "LeftArm", "RightArm", "LeftLeg", "RightLeg"],
-    "anim":   ["IdleAnimation", "WalkAnimation", "RunAnimation", "JumpAnimation", "FallAnimation", "ClimbAnimation",
-               "SwimAnimation", "MoodAnimation"],
-    "emote":  ["EmoteAnimation"],
-}
-INV_CATS = ["bundle", "hair", "head", "face", "top", "bottom", "shoes", "acc", "emote", "anim", "body"]
-
 def _inv_assets(uid, types, cursor):
     q = {"assetTypes": ",".join(types), "limit": 100, "sortOrder": "Desc"}
     if cursor: q["cursor"] = cursor
@@ -453,7 +489,7 @@ def _inv_assets(uid, types, cursor):
             items.append(_item(aid, a.get("assetType") or "", a.get("name") or a.get("assetName") or ""))
     return items, d.get("nextPageCursor")
 
-PIECE_CATS = {"body", "anim", "shoes", "face"}  # หมวดที่มีชิ้นส่วนของ bundle ปน (หัว/ตัว/แขนขา/ท่าเดิน/รองเท้า/หน้า)
+PIECE_TYPES_INV = set(PIECE_TYPES)  # ชิ้นที่มักมาจาก bundle (หัว/ตัว/แขนขา/ท่าเดิน/รองเท้า/สีหน้า) → ซ่อนถ้าอยู่ใน bundle ที่มีแล้ว
 
 def _bundle_piece_ids(uid):
     """รหัสชิ้นส่วนทุกชิ้นที่อยู่ใน bundle ที่คนนี้มี → ใช้ซ่อนชิ้นซ้ำในหมวดร่างกาย/ท่าเดิน/รองเท้า/หน้า (bundle ขึ้นเป็นใบเดียวในหมวดชุดเซ็ตแล้ว)"""
@@ -484,31 +520,35 @@ def _bundle_piece_ids(uid):
         return set()
 
 def inventory(uid, cat, cursor):
-    if cat not in INV_CATS:
+    if cat not in INV_KEYS:
         raise FoError(400, "หมวดไม่ถูกต้อง")
+    main, types = INV_KEYS[cat]
     cursor = (cursor or "")[:600]
     def go():
         try:
-            if cat == "bundle":
+            if main == "bundle":
                 q = {"limit": 100, "sortOrder": "Desc"}
                 if cursor: q["cursor"] = cursor
                 d = _req(f"https://catalog.roblox.com/v1/users/{uid}/bundles?" + urllib.parse.urlencode(q))
                 items = [{"id": b["id"], "key": "b" + str(b["id"]), "bundle": True, "type": b.get("bundleType", ""),
-                          "cat": "bundle", "name": b.get("name", "")} for b in d.get("data") or [] if b.get("id")]
-                return {"items": items, "next": d.get("nextPageCursor"), "private": False}
-            items, nxt = _inv_assets(uid, INV_TYPES[cat], cursor)
+                          "cat": "bundle", "sub": BUNDLE_SUB.get(b.get("bundleType", ""), "bundle"), "name": b.get("name", "")}
+                         for b in d.get("data") or [] if b.get("id")]
+                if cat != "bundle":
+                    items = [it for it in items if it["type"] in types]
+                return {"items": items, "next": d.get("nextPageCursor"), "private": False, "hidden": 0}
+            items, nxt = _inv_assets(uid, types, cursor)
             hidden = 0
-            if cat in PIECE_CATS and items:
+            if items and any(t in PIECE_TYPES_INV for t in types):
                 pieces = _bundle_piece_ids(uid)
-                keep = [it for it in items if it["id"] not in pieces]
+                keep = [it for it in items if not (it["type"] in PIECE_TYPES_INV and it["id"] in pieces)]
                 hidden = len(items) - len(keep)
                 items = keep
             return {"items": items, "next": nxt, "private": False, "hidden": hidden}
         except urllib.error.HTTPError as e:
             if e.code in (401, 403):
-                return {"items": [], "next": None, "private": True}
+                return {"items": [], "next": None, "private": True, "hidden": 0}
             raise
-    return _cached(("inv", uid, cat, cursor), 300, go)
+    return _cached(("inv2", uid, cat, cursor), 300, go)
 
 # ---------------- เส้นทาง ----------------
 def handle_get(path, query):
@@ -526,6 +566,7 @@ def handle_get(path, query):
         if path == "/api/fo/person":  return 200, person(num("uid"))
         if path == "/api/fo/outfit":  return 200, outfit(num("id"))
         if path == "/api/fo/inv":     return 200, inventory(num("uid"), g("cat"), g("cursor"))
+        if path == "/api/fo/invmeta": return 200, INV_META
         if path == "/api/fo/thumbs":
             kind = g("kind")
             if kind not in THUMB_URL: raise FoError(400, "kind")
@@ -616,6 +657,8 @@ header h1 small{display:block;font-size:13px;font-weight:400;color:var(--sub);ma
 .bar{display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin:0 0 10px}
 .chip{border:0;font:inherit;font-size:12px;cursor:pointer;padding:6px 12px;border-radius:999px;background:var(--panel);color:var(--sub)}
 .chip.on{background:var(--lilac);color:#241b38}
+.chip.main{font-size:13px;padding:8px 16px;font-weight:500}.chip.main.on{background:var(--pink);color:#2a1220}
+.bar.sub{margin-top:-4px}.bar.sub .chip{background:var(--card)}.bar.sub .chip.on{background:var(--lilac)}
 .seg{display:inline-flex;background:var(--panel);border-radius:999px;padding:2px}
 .seg button{border:0;font:inherit;font-size:12px;cursor:pointer;padding:5px 11px;border-radius:999px;background:none;color:var(--sub);min-width:30px}
 .seg button.on{background:var(--lilac);color:#241b38}
@@ -682,6 +725,10 @@ const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&g
 const t=k=>T[L][k];
 const itemCache={};
 let person=null, tab='wearing', shown=60, invCat='bundle', inv={};
+const INVMETA=__INVMETA__;
+const SUBLBL={};INVMETA.mains.forEach(m=>{SUBLBL[m.k]=m;m.subs.forEach(x=>{SUBLBL[x.k]=Object.assign({main:m},x)})});
+const SUBORDER=[];INVMETA.mains.forEach(m=>{m.subs.forEach(x=>SUBORDER.push(x.k));SUBORDER.push(m.k)});SUBORDER.push('other');
+const lbl=o=>o?(L==='en'?o.en:o.th):'';
 const SIZES={i:[84,110,140,180],o:[96,130,165,210],r:[30,40,56,72]};
 const UI0={sort:'def',grp:true,view:'grid',size:1};
 let ui=(()=>{try{return Object.assign({},UI0,JSON.parse(localStorage.getItem('fo_ui')||'{}'))}catch(e){return Object.assign({},UI0)}})();
@@ -750,18 +797,20 @@ function itemCard(it){
   const href=it.bundle?'https://www.roblox.com/bundles/'+it.id:'https://www.roblox.com/catalog/'+it.id;
   const by=d.creator?'<div class="by">'+esc(t('by'))+' '+esc(d.creator)+'</div>':'';
   const tip=esc(nm+(d.creator?' — '+t('by')+' '+d.creator:''));
-  if(ui.view==='list') return '<a class="rowi" href="'+href+'" target="_blank" rel="noopener" title="'+tip+'"><div class="th">'+th+'</div><div class="n">'+esc(nm)+' <span>· '+esc(T[L].cats[it.cat])+(d.creator?' · '+esc(t('by'))+' '+esc(d.creator):'')+'</span></div>'+priceHtml(d)+'</a>';
+  if(ui.view==='list') return '<a class="rowi" href="'+href+'" target="_blank" rel="noopener" title="'+tip+'"><div class="th">'+th+'</div><div class="n">'+esc(nm)+' <span>· '+esc(SUBLBL[it.sub]?lbl(SUBLBL[it.sub]):(T[L].cats[it.cat]||''))+(d.creator?' · '+esc(t('by'))+' '+esc(d.creator):'')+'</span></div>'+priceHtml(d)+'</a>';
   return '<a class="item" href="'+href+'" target="_blank" rel="noopener" title="'+tip+'"><div class="th">'+th+'</div><div class="n">'+esc(nm)+'</div>'+by+priceHtml(d)+'</a>';
 }
 function itemsHtml(items){
   const list=sortBy(items,'items',nmOf), wrap=ui.view==='list'?'rows':'items';
   if(!ui.grp) return '<div class="'+wrap+'">'+list.map(itemCard).join('')+'</div>';
+  // (2026-11-24) แยกตามหมวดย่อย แบบหน้า Inventory ของ Roblox: "เครื่องประดับ · หมวก"
   const groups={};
-  list.forEach(it=>(groups[it.cat]=groups[it.cat]||[]).push(it));
+  list.forEach(it=>{const k=SUBLBL[it.sub]?it.sub:(it.bundle?'bundle':'other');(groups[k]=groups[k]||[]).push(it)});
   let h='';
-  ORDER.forEach(c=>{
+  SUBORDER.forEach(c=>{
     if(!groups[c]) return;
-    h+='<div class="cat"><h3>'+esc(T[L].cats[c])+' · '+groups[c].length+'</h3><div class="'+wrap+'">'+groups[c].map(itemCard).join('')+'</div></div>';
+    const o=SUBLBL[c], name=o?(o.main?lbl(o.main)+' · '+lbl(o):lbl(o)):T[L].cats.other;
+    h+='<div class="cat"><h3>'+esc(name)+' · '+groups[c].length+'</h3><div class="'+wrap+'">'+groups[c].map(itemCard).join('')+'</div></div>';
   });
   return h;
 }
@@ -802,9 +851,10 @@ function renderPerson(){
   if(tab==='wearing'){
     h+='<div class="wear"><div class="avatar">'+(p.avatarImg?'<img src="'+esc(p.avatarImg)+'" alt="">':'')+'<div class="sum">'+totalHtml(p.wearing)+'</div></div><div>'+barHtml('items')+itemsHtml(p.wearing)+'</div></div>';
   }else if(tab==='inv'){
-    const INV=['bundle','hair','head','face','top','bottom','shoes','acc','emote','anim','body'];
-    const st=inv[invCat];
-    h+='<div class="bar">'+INV.map(c=>{const x=inv[c];const n=x&&x.items&&!x.next?' ('+x.items.length+')':(x&&x.items&&x.items.length?' ('+x.items.length+'+)':'');return '<button class="chip'+(invCat===c?' on':'')+'" data-ic="'+c+'">'+esc(T[L].cats[c])+n+'</button>'}).join('')+'</div>';
+    const st=inv[invCat], mainK=invCat.split('.')[0], main=INVMETA.mains.find(m=>m.k===mainK)||INVMETA.mains[0];
+    const cnt=c=>{const x=inv[c];return x&&x.items?' ('+x.items.length+(x.next?'+':'')+')':''};
+    h+='<div class="bar">'+INVMETA.mains.map(m=>'<button class="chip main'+(m.k===mainK?' on':'')+'" data-ic="'+m.k+'">'+esc(lbl(m))+'</button>').join('')+'</div>';
+    h+='<div class="bar sub">'+[{k:main.k,th:'ทั้งหมด',en:'All'}].concat(main.subs).map(x=>'<button class="chip'+(invCat===x.k?' on':'')+'" data-ic="'+x.k+'">'+esc(lbl(x))+cnt(x.k)+'</button>').join('')+'</div>';
     if(!st||st.loading&&!st.items) h+='<div class="msg">'+t('loading')+'</div>';
     else if(st.err) h+='<div class="note">'+esc(st.err)+'</div>';
     else if(st.private) h+='<div class="note">'+t('invPriv')+'</div>';
@@ -904,3 +954,4 @@ const m=(location.hash||'').match(/u=(\d+)/); if(m){$('#q').value=m[1];openPerso
 </script>
 </body>
 </html>"""
+FO_HTML = FO_HTML.replace("__INVMETA__", json.dumps(INV_META, ensure_ascii=False))

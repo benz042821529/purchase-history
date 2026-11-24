@@ -2108,6 +2108,7 @@ window.addEventListener('DOMContentLoaded',load)
 
 # (2026-11-20) หน้า "ดูชุดผู้เล่น" /friends — โค้ดอยู่ใน friend_outfits.py
 import friend_outfits as FO
+import news as NEWS  # (2026-11-24) ข่าว Roblox ให้แมพ: GET /api/news
 FO.init(roblox_get=roblox_get, fetch_item_details=fetch_item_details, base=BASE,
         cache_get=cache_get, cache_set=cache_set)
 
@@ -2201,6 +2202,14 @@ class Handler(BaseHTTPRequestHandler):
             self.send_header("Content-Length", str(len(b)))
             self.end_headers()
             self.wfile.write(b)
+            return
+        if parsed.path == "/api/news":
+            if not FO.rate_ok(self._client_ip()):
+                self._json(429, {"message": "too many requests"}); return
+            try:
+                self._json(200, NEWS.get_news())
+            except Exception as e:
+                self._json(500, {"message": str(e)})
             return
         if parsed.path.startswith("/api/fo/"):
             if not FO.rate_ok(self._client_ip()):

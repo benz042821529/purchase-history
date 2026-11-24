@@ -77,6 +77,7 @@ THUMB_URL = {
     "avatar":   "https://thumbnails.roblox.com/v1/users/avatar?userIds={}&size=420x420&format=Png&isCircular=false",
     "outfit":   "https://thumbnails.roblox.com/v1/users/outfits?userOutfitIds={}&size=420x420&format=Png&isCircular=false",
     "asset":    "https://thumbnails.roblox.com/v1/assets?assetIds={}&size=150x150&format=Png&isCircular=false",
+    "bundle":   "https://thumbnails.roblox.com/v1/bundles/thumbnails?bundleIds={}&size=150x150&format=Png&isCircular=false",
 }
 
 def thumbs(kind, ids):
@@ -894,16 +895,32 @@ function priceHtml(d){
   if(d.price>0) return '<div class="p">R$ '+d.price.toLocaleString()+'</div>';
   return '<div class="p off">—</div>';
 }
-async function fillItems(ids){
+// (2026-11-24) โหลดเร็วขึ้น: 1) ดึง "รูป" อย่างเดียวก่อน (เร็ว) แสดงทันที  2) ค่อยเติมชื่อ/ราคา ทีละชุด พร้อมกันได้ 3 ชุด
+const thumbCache={};
+async function fillThumbs(keys){
+  const a=[],b=[];
+  keys.forEach(k=>{if(thumbCache[k]||(itemCache[k]||{}).thumb)return; if(/^b\d+$/.test(k))b.push(k.slice(1)); else if(/^\d+$/.test(k))a.push(k)});
+  const jobs=[];
+  for(let i=0;i<a.length;i+=100) jobs.push(api('/api/fo/thumbs?kind=asset&ids='+a.slice(i,i+100).join(',')).then(r=>{for(const id in r) thumbCache[id]=r[id]}).catch(()=>{}));
+  for(let i=0;i<b.length;i+=100) jobs.push(api('/api/fo/thumbs?kind=bundle&ids='+b.slice(i,i+100).join(',')).then(r=>{for(const id in r) thumbCache['b'+id]=r[id]}).catch(()=>{}));
+  await Promise.all(jobs);
+}
+async function fillItems(ids,onStep){
   const need=ids.filter(i=>!(i in itemCache));
-  for(let k=0;k<need.length;k+=60){
-    try{Object.assign(itemCache,await api('/api/fo/items',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:need.slice(k,k+60)})}))}catch(e){}
-  }
+  if(!need.length) return;
+  await fillThumbs(need); if(onStep) onStep();
+  const chunks=[]; for(let k=0;k<need.length;k+=60) chunks.push(need.slice(k,k+60));
+  let next=0;
+  const worker=async()=>{while(next<chunks.length){const c=chunks[next++];
+    try{Object.assign(itemCache,await api('/api/fo/items',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:c})}))}catch(e){}
+    if(onStep) onStep()}};
+  await Promise.all([worker(),worker(),worker()]);
 }
 function itemCard(it){
   const d=itemCache[kOf(it)]||{};
   const nm=(it.bundle?'📦 ':'')+(d.name||it.name||('#'+it.id));
-  const th=d.thumb?'<img loading="lazy" src="'+esc(d.thumb)+'" alt="">':'';
+  const tu=d.thumb||thumbCache[kOf(it)];
+  const th=tu?'<img loading="lazy" src="'+esc(tu)+'" alt="">':'';
   const href=it.bundle?'https://www.roblox.com/bundles/'+it.id:'https://www.roblox.com/catalog/'+it.id;
   const by=d.creator?'<div class="by">'+esc(t('by'))+' '+esc(d.creator)+'</div>':'';
   const tip=esc(nm+(d.creator?' — '+t('by')+' '+d.creator:''));
@@ -947,7 +964,7 @@ async function openPerson(uid){
   try{
     person=await api('/api/fo/person?uid='+uid);
     tab='wearing'; shown=60; inv={}; renderPerson();
-    await fillItems(person.wearing.map(kOf)); if(tab==='wearing') renderPerson();
+    await fillItems(person.wearing.map(kOf),()=>{if(tab==='wearing')renderPerson()}); if(tab==='wearing') renderPerson();
     retryThumbs();
     if(person.wearErr) retryWearing(uid);
   }catch(e){out.innerHTML='<div class="msg err">'+esc(e.message)+'</div>'}
@@ -1040,7 +1057,7 @@ async function loadInv(cat,more){
     if(person!==p) return;
     st.private=r.private; st.hidden=(more?(st.hidden||0):0)+(r.hidden||0); st.items=(more&&st.items?st.items:[]).concat(r.items||[]); st.next=r.next||null;
     st.loading=false; if(tab==='inv'&&invCat===cat) renderPerson();
-    await fillItems((r.items||[]).map(kOf));
+    await fillItems((r.items||[]).map(kOf),()=>{if(person===p&&tab==='inv'&&invCat===cat)renderPerson()});
   }catch(e){st.loading=false; if(!st.items) st.err=e.message}
   if(person===p&&tab==='inv'&&invCat===cat) renderPerson();
 }
@@ -1064,9 +1081,10 @@ async function openOutfit(id){
   showModal(o.name||'',' <div class="msg">'+t('loading')+'</div>');
   try{
     const d=await api('/api/fo/outfit?id='+id);
-    await fillItems(d.items.map(kOf));
     const draw=()=>{showModal(o.name||d.name,'<div class="wear"><div class="avatar">'+(o.img?'<img src="'+esc(o.img)+'" alt="">':'')+'<div class="sum">'+totalHtml(d.items)+'</div></div><div>'+barHtml('items')+itemsHtml(d.items)+'</div></div>');bindBar(mb,()=>{draw();renderPerson()})};
     draw();
+    await fillItems(d.items.map(kOf),()=>{if(modal.classList.contains('on'))draw()});
+    if(modal.classList.contains('on')) draw();
   }catch(e){showModal(o.name||'','<div class="msg err">'+esc(e.message)+'</div>')}
 }
 async function openMap(i){

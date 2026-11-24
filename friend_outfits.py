@@ -205,52 +205,66 @@ ACC_TYPE = {
 
 # ---------------- (2026-11-24) หมวดหลัก → หมวดย่อย แบบหน้า Inventory ของ Roblox (ใช้ทั้งเว็บและในเกม) ----------------
 # key หมวดย่อย = "<หลัก>.<ย่อย>" · key หมวดหลักเฉยๆ = ทั้งหมดในหมวดนั้น
+# (2026-11-24 v2) หมวดเหมือน "ของที่มี" ในร้านของแมพ (= หน้า Customize ของ Roblox) · bundle ขึ้นเป็นใบเดียว ไม่แยกชิ้นส่วน
+# (key, ไทย, อังกฤษ, [ (subkey, ไทย, อังกฤษ, [assetTypes], [bundleTypes]) ])  · หมวดที่ไม่มีหมวดย่อย = ใส่ประเภทไว้ในแถว "" ตัวเดียว
 INV_MAINS = [
-    ("bundle", "ชุดเซ็ต", "Bundles", [
-        ("char", "ตัวละคร", "Characters", ["BodyParts", "DynamicHead", "DynamicHeadAvatar"]),
-        ("anim", "ชุดท่าเดิน", "Animation packs", ["Animations", "AvatarAnimations"]),
-        ("shoes", "รองเท้า", "Shoes", ["Shoes"]),
-    ]),
-    ("acc", "เครื่องประดับ", "Accessories", [
-        ("hat", "หมวก", "Hats", ["Hat"]), ("hair", "ผม", "Hair", ["HairAccessory"]),
-        ("face", "หน้า", "Face", ["FaceAccessory"]), ("neck", "คอ", "Neck", ["NeckAccessory"]),
-        ("shoulder", "ไหล่", "Shoulder", ["ShoulderAccessory"]), ("front", "ด้านหน้า", "Front", ["FrontAccessory"]),
-        ("back", "ด้านหลัง", "Back", ["BackAccessory"]), ("waist", "เอว", "Waist", ["WaistAccessory"]),
-        ("gear", "Gear", "Gear", ["Gear"]),
-    ]),
-    ("cloth", "เสื้อผ้า", "Clothing", [
-        ("tshirt3d", "เสื้อยืด", "T-Shirts", ["TShirtAccessory"]), ("shirt3d", "เสื้อ", "Shirts", ["ShirtAccessory"]),
-        ("jacket", "แจ็กเก็ต", "Jackets", ["JacketAccessory"]), ("sweater", "สเวตเตอร์", "Sweaters", ["SweaterAccessory"]),
-        ("pants3d", "กางเกง", "Pants", ["PantsAccessory"]), ("shorts", "กางเกงขาสั้น", "Shorts", ["ShortsAccessory"]),
-        ("dress", "เดรส / กระโปรง", "Dresses & Skirts", ["DressSkirtAccessory"]),
-        ("shoes", "รองเท้า", "Shoes", ["LeftShoeAccessory", "RightShoeAccessory"]),
-        ("shirt", "เสื้อ 2D", "Classic Shirts", ["Shirt"]), ("tshirt", "เสื้อยืด 2D", "Classic T-Shirts", ["TShirt"]),
-        ("pants", "กางเกง 2D", "Classic Pants", ["Pants"]),
-    ]),
+    ("avatars", "อวาตาร์", "Avatars", [("", "", "", [], ["BodyParts", "DynamicHeadAvatar"])]),
     ("body", "ร่างกาย", "Body", [
-        ("head", "หัว", "Heads", ["DynamicHead", "Head"]), ("face", "หน้า", "Faces", ["Face"]),
-        ("brow", "คิ้ว", "Eyebrows", ["EyebrowAccessory"]), ("lash", "ขนตา", "Eyelashes", ["EyelashAccessory"]),
-        ("torso", "ลำตัว", "Torsos", ["Torso"]), ("arms", "แขน", "Arms", ["LeftArm", "RightArm"]),
-        ("legs", "ขา", "Legs", ["LeftLeg", "RightLeg"]), ("mood", "สีหน้า", "Moods", ["MoodAnimation"]),
+        ("hair", "ผม", "Hair", ["HairAccessory"], []),
+        ("heads", "หัว", "Heads", ["DynamicHead", "Head"], ["DynamicHead"]),
+        ("faces", "หน้า", "Faces", ["Face"], []),
+        ("parts", "ส่วนร่างกาย", "Body Parts", ["Torso", "LeftArm", "RightArm", "LeftLeg", "RightLeg"], []),
+        ("moods", "สีหน้า", "Moods", ["MoodAnimation"], []),
     ]),
-    ("anim", "ท่าทาง", "Animations", [
-        ("emote", "อีโมต", "Emotes", ["EmoteAnimation"]), ("idle", "ยืน", "Idle", ["IdleAnimation"]),
-        ("walk", "เดิน", "Walk", ["WalkAnimation"]), ("run", "วิ่ง", "Run", ["RunAnimation"]),
-        ("jump", "กระโดด", "Jump", ["JumpAnimation"]), ("fall", "ตก", "Fall", ["FallAnimation"]),
-        ("climb", "ปีน", "Climb", ["ClimbAnimation"]), ("swim", "ว่ายน้ำ", "Swim", ["SwimAnimation"]),
+    ("clothing", "เสื้อผ้า", "Clothing", [
+        ("shirts", "เสื้อ", "Shirts", ["ShirtAccessory"], []),
+        ("tshirts", "เสื้อยืด", "T-Shirts", ["TShirtAccessory"], []),
+        ("sweaters", "สเวตเตอร์", "Sweaters", ["SweaterAccessory"], []),
+        ("jackets", "แจ็กเก็ต", "Jackets", ["JacketAccessory"], []),
+        ("pants", "กางเกง", "Pants", ["PantsAccessory"], []),
+        ("dresses", "เดรสและกระโปรง", "Dresses & Skirts", ["DressSkirtAccessory"], []),
+        ("shorts", "กางเกงขาสั้น", "Shorts", ["ShortsAccessory"], []),
+        ("shoes", "รองเท้า", "Shoes", ["LeftShoeAccessory", "RightShoeAccessory"], ["Shoes"]),
+        ("cshirts", "เสื้อคลาสสิก", "Classic Shirts", ["Shirt"], []),
+        ("ctshirts", "เสื้อยืดคลาสสิก", "Classic T-Shirts", ["TShirt"], []),
+        ("cpants", "กางเกงคลาสสิก", "Classic Pants", ["Pants"], []),
+    ]),
+    ("accessories", "ไอเท็มเสริม", "Accessories", [
+        ("head", "หัว", "Head", ["Hat"], []),
+        ("face", "หน้า", "Face", ["FaceAccessory"], []),
+        ("neck", "คอ", "Neck", ["NeckAccessory"], []),
+        ("shoulder", "ไหล่", "Shoulder", ["ShoulderAccessory"], []),
+        ("front", "ด้านหน้า", "Front", ["FrontAccessory"], []),
+        ("back", "ด้านหลัง", "Back", ["BackAccessory"], []),
+        ("waist", "เอว", "Waist", ["WaistAccessory"], []),
+        ("gear", "Gear", "Gear", ["Gear"], []),
+    ]),
+    ("backgrounds", "พื้นหลัง", "Backgrounds", [("", "", "", ["AvatarBackground"], [])]),
+    ("animations", "แอนิเมชัน", "Animations", [
+        ("packs", "ชุดท่าเดิน", "Bundles", [], ["Animations", "AvatarAnimations"]),
+        ("idle", "ยืน", "Idle", ["IdleAnimation"], []), ("walk", "เดิน", "Walk", ["WalkAnimation"], []),
+        ("run", "วิ่ง", "Run", ["RunAnimation"], []), ("jump", "กระโดด", "Jump", ["JumpAnimation"], []),
+        ("fall", "ตก", "Fall", ["FallAnimation"], []), ("climb", "ปีน", "Climb", ["ClimbAnimation"], []),
+        ("swim", "ว่ายน้ำ", "Swim", ["SwimAnimation"], []),
+    ]),
+    ("emotes", "อีโมต", "Emotes", [("", "", "", ["EmoteAnimation"], [])]),
+    ("makeup", "แต่งหน้า", "Makeup", [
+        ("eyes", "ตา", "Eyes", ["EyeMakeup"], []), ("lips", "ปาก", "Lips", ["LipMakeup"], []),
+        ("face", "หน้า", "Face", ["FaceMakeup"], []), ("lashes", "ขนตา", "Eyelashes", ["EyelashAccessory"], []),
+        ("brows", "คิ้ว", "Eyebrows", ["EyebrowAccessory"], []),
     ]),
 ]
-INV_KEYS = {}      # key → (main, [types])
+INV_KEYS = {}      # key → ([assetTypes], [bundleTypes])
 TYPE_SUB = {}      # assetType → key หมวดย่อย
 BUNDLE_SUB = {}    # bundleType → key หมวดย่อย
 for _m, _th, _en, _subs in INV_MAINS:
-    INV_KEYS[_m] = (_m, [t for _s in _subs for t in _s[3]])
-    for _k, _sth, _sen, _types in _subs:
-        INV_KEYS[f"{_m}.{_k}"] = (_m, _types)
-        for _t in _types:
-            if _m == "bundle": BUNDLE_SUB.setdefault(_t, f"{_m}.{_k}")
-            else: TYPE_SUB.setdefault(_t, f"{_m}.{_k}")
-INV_META = {"mains": [{"k": m, "th": th, "en": en, "subs": [{"k": f"{m}.{k}", "th": sth, "en": sen} for k, sth, sen, _ in subs]}
+    INV_KEYS[_m] = ([t for _s in _subs for t in _s[3]], [t for _s in _subs for t in _s[4]])
+    for _k, _sth, _sen, _at, _bt in _subs:
+        _key = f"{_m}.{_k}" if _k else _m
+        if _k: INV_KEYS[_key] = (_at, _bt)
+        for _t in _at: TYPE_SUB.setdefault(_t, _key)
+        for _t in _bt: BUNDLE_SUB.setdefault(_t, _key)
+INV_META = {"mains": [{"k": m, "th": th, "en": en, "subs": [{"k": f"{m}.{k}", "th": sth, "en": sen} for k, sth, sen, _a, _b in subs if k]}
                       for m, th, en, subs in INV_MAINS]}
 
 def _item(aid, atype, name=""):
@@ -341,7 +355,7 @@ def merge_bundles(items):
             out.append(it)
         elif b["id"] not in placed:
             placed.add(b["id"])
-            out.append({"id": b["id"], "key": "b" + str(b["id"]), "bundle": True, "type": b["type"], "sub": BUNDLE_SUB.get(b["type"], "bundle"),
+            out.append({"id": b["id"], "key": "b" + str(b["id"]), "bundle": True, "type": b["type"], "sub": BUNDLE_SUB.get(b["type"], "avatars"),
                         "cat": BUNDLE_CAT.get(b["type"], "bundle"), "name": b["name"], "pieces": len([i for i in first_of if first_of[i] is b])})
     return out
 
@@ -529,31 +543,31 @@ def _bundle_piece_ids(uid):
 def inventory(uid, cat, cursor):
     if cat not in INV_KEYS:
         raise FoError(400, "หมวดไม่ถูกต้อง")
-    main, types = INV_KEYS[cat]
+    atypes, btypes = INV_KEYS[cat]
     cursor = (cursor or "")[:600]
     def go():
         try:
-            if main == "bundle":
-                allb = [b for b in _user_bundles(uid) if cat == "bundle" or b["type"] in types]
-                start = int(cursor) if cursor.isdigit() else 0
-                page = allb[start:start + 100]
-                items = [{"id": b["id"], "key": "b" + str(b["id"]), "bundle": True, "type": b["type"], "cat": "bundle",
-                          "sub": BUNDLE_SUB.get(b["type"], "bundle"), "name": b["name"]} for b in page]
-                nxt = str(start + 100) if start + 100 < len(allb) else None
-                return {"items": items, "next": nxt, "private": False, "hidden": 0}
-            items, nxt = _inv_assets(uid, types, cursor)
-            hidden = 0
-            if items and any(t in PIECE_TYPES_INV for t in types):
-                pieces = _bundle_piece_ids(uid)
-                keep = [it for it in items if not (it["type"] in PIECE_TYPES_INV and it["id"] in pieces)]
-                hidden = len(items) - len(keep)
-                items = keep
+            items, nxt, hidden = [], None, 0
+            # bundle ขึ้นเป็นใบเดียว (หน้าแรกเท่านั้น) — ชิ้นส่วนของ bundle ที่มีจะถูกซ่อนด้านล่าง
+            if btypes and not cursor:
+                for b in _user_bundles(uid):
+                    if b["type"] in btypes:
+                        items.append({"id": b["id"], "key": "b" + str(b["id"]), "bundle": True, "type": b["type"], "cat": "bundle",
+                                      "sub": BUNDLE_SUB.get(b["type"], cat), "name": b["name"]})
+            if atypes:
+                got, nxt = _inv_assets(uid, atypes, cursor)
+                if got and any(t in PIECE_TYPES_INV for t in atypes):
+                    pieces = _bundle_piece_ids(uid)
+                    keep = [it for it in got if not (it["type"] in PIECE_TYPES_INV and it["id"] in pieces)]
+                    hidden = len(got) - len(keep)
+                    got = keep
+                items += got
             return {"items": items, "next": nxt, "private": False, "hidden": hidden}
         except urllib.error.HTTPError as e:
             if e.code in (401, 403):
                 return {"items": [], "next": None, "private": True, "hidden": 0}
             raise
-    return _cached(("inv2", uid, cat, cursor), 300, go)
+    return _cached(("inv3", uid, cat, cursor), 300, go)
 
 # ---------------- เส้นทาง ----------------
 def handle_get(path, query):
@@ -729,7 +743,7 @@ const $=s=>document.querySelector(s), out=$('#out'), modal=$('#m'), mb=$('#mb');
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
 const t=k=>T[L][k];
 const itemCache={};
-let person=null, tab='wearing', shown=60, invCat='bundle', inv={};
+let person=null, tab='wearing', shown=60, invCat='avatars', inv={};
 const INVMETA=__INVMETA__;
 const SUBLBL={};INVMETA.mains.forEach(m=>{SUBLBL[m.k]=m;m.subs.forEach(x=>{SUBLBL[x.k]=Object.assign({main:m},x)})});
 const SUBORDER=[];INVMETA.mains.forEach(m=>{m.subs.forEach(x=>SUBORDER.push(x.k));SUBORDER.push(m.k)});SUBORDER.push('other');
@@ -810,7 +824,7 @@ function itemsHtml(items){
   if(!ui.grp) return '<div class="'+wrap+'">'+list.map(itemCard).join('')+'</div>';
   // (2026-11-24) แยกตามหมวดย่อย แบบหน้า Inventory ของ Roblox: "เครื่องประดับ · หมวก"
   const groups={};
-  list.forEach(it=>{const k=SUBLBL[it.sub]?it.sub:(it.bundle?'bundle':'other');(groups[k]=groups[k]||[]).push(it)});
+  list.forEach(it=>{const k=SUBLBL[it.sub]?it.sub:(it.bundle?'avatars':'other');(groups[k]=groups[k]||[]).push(it)});
   let h='';
   SUBORDER.forEach(c=>{
     if(!groups[c]) return;
@@ -859,7 +873,7 @@ function renderPerson(){
     const st=inv[invCat], mainK=invCat.split('.')[0], main=INVMETA.mains.find(m=>m.k===mainK)||INVMETA.mains[0];
     const cnt=c=>{const x=inv[c];return x&&x.items?' ('+x.items.length+(x.next?'+':'')+')':''};
     h+='<div class="bar">'+INVMETA.mains.map(m=>'<button class="chip main'+(m.k===mainK?' on':'')+'" data-ic="'+m.k+'">'+esc(lbl(m))+'</button>').join('')+'</div>';
-    h+='<div class="bar sub">'+[{k:main.k,th:'ทั้งหมด',en:'All'}].concat(main.subs).map(x=>'<button class="chip'+(invCat===x.k?' on':'')+'" data-ic="'+x.k+'">'+esc(lbl(x))+cnt(x.k)+'</button>').join('')+'</div>';
+    if(main.subs.length) h+='<div class="bar sub">'+[{k:main.k,th:'ทั้งหมด',en:'All'}].concat(main.subs).map(x=>'<button class="chip'+(invCat===x.k?' on':'')+'" data-ic="'+x.k+'">'+esc(lbl(x))+cnt(x.k)+'</button>').join('')+'</div>';
     if(!st||st.loading&&!st.items) h+='<div class="msg">'+t('loading')+'</div>';
     else if(st.err) h+='<div class="note">'+esc(st.err)+'</div>';
     else if(st.private) h+='<div class="note">'+t('invPriv')+'</div>';

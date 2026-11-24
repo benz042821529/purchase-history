@@ -174,12 +174,13 @@ def friends(uid):
 
 # ---------------- ประเภทไอเทม → หมวด (ไทย/อังกฤษ) ----------------
 CAT = {
+    "bundle": ("ชุดเซ็ต (Bundle)", "Bundles"),
     "hair":   ("ผม", "Hair"),        "head":   ("หมวก / หัว", "Head"),   "face":  ("หน้า", "Face"),
     "top":    ("เสื้อ", "Tops"),      "bottom": ("กางเกง / กระโปรง", "Bottoms"), "shoes": ("รองเท้า", "Shoes"),
     "acc":    ("เครื่องประดับ", "Accessories"), "body": ("ร่างกาย", "Body"), "anim": ("ท่าเดิน / ท่าทาง", "Animations"),
     "emote":  ("อีโมต", "Emotes"),   "other":  ("อื่นๆ", "Other"),
 }
-CAT_ORDER = ["hair", "head", "face", "top", "bottom", "shoes", "acc", "body", "anim", "emote", "other"]
+CAT_ORDER = ["bundle", "hair", "head", "face", "top", "bottom", "shoes", "acc", "body", "anim", "emote", "other"]
 TYPE_CAT = {
     "HairAccessory": "hair", "Hat": "head", "Face": "face", "FaceAccessory": "face", "EyebrowAccessory": "face",
     "EyelashAccessory": "face", "MoodAnimation": "face", "DynamicHead": "body",
@@ -235,8 +236,21 @@ def _bundles_of(aid):
         return out
     return _cached(("abundles", aid), 86400, go)
 
+def _norm(t):
+    return "".join(ch for ch in (t or "").lower() if ch.isalnum())
+
+_NAME_OF = {}
+
+def _name_hit(b, left):
+    bn = _norm(b.get("name"))
+    return 1 if bn and any(bn[:12] and _norm(_NAME_OF.get(i, "")).startswith(bn[:12]) for i in left) else 0
+
 def merge_bundles(items):
-    pieces = [it for it in items if it.get("type") in PIECE_TYPES]
+    for it in items:
+        if it.get("id"):
+            _NAME_OF[it["id"]] = it.get("name", "")
+    # รวมทุกชิ้นที่อยู่ใน bundle (ไม่จำกัดแค่ร่างกาย/ท่าเดิน/รองเท้า) — ตามที่ขอให้เว็บรวมทั้งหมด
+    pieces = [it for it in items if it.get("id") and not it.get("bundle")]
     if not pieces:
         return items
     with ThreadPoolExecutor(max_workers=6) as ex:
@@ -255,14 +269,14 @@ def merge_bundles(items):
             left = b["cover"] - used
             if not left:
                 continue
-            # bundle เดียวที่ชิ้นนั้นอยู่ หรือคลุมได้ตั้งแต่ 2 ชิ้น
-            ok = len(left) >= 2 or any(len(found.get(i, [])) == 1 for i in left)
-            if ok and (best is None or len(left) > len(best[1])):
-                best = (b, left)
+            # เลือก bundle ที่คลุมได้มากที่สุดก่อน ถ้าเท่ากันเลือกอันที่ชื่อตรงกับชื่อชิ้น
+            score = (len(left), _name_hit(b, left))
+            if best is None or score > best[2]:
+                best = (b, left, score)
         if not best:
             break
         used |= best[1]
-        chosen.append(best)
+        chosen.append(best[:2])
     if not chosen:
         return items
     out, placed = [], set()
@@ -277,7 +291,7 @@ def merge_bundles(items):
         elif b["id"] not in placed:
             placed.add(b["id"])
             out.append({"id": b["id"], "key": "b" + str(b["id"]), "bundle": True, "type": b["type"],
-                        "cat": BUNDLE_CAT.get(b["type"], "body"), "name": b["name"], "pieces": len([i for i in first_of if first_of[i] is b])})
+                        "cat": BUNDLE_CAT.get(b["type"], "bundle"), "name": b["name"], "pieces": len([i for i in first_of if first_of[i] is b])})
     return out
 
 # ---------------- ชุดของคนหนึ่งคน ----------------
@@ -565,7 +579,7 @@ const T={
   noMap:'ยังไม่เคยเซฟชุดในแมพ',mapPerm:'ยังเปิดดูชุดในแมพไม่ได้ (ต้องเพิ่มสิทธิ์ API key ให้อ่าน DataStore PlayerOutfitCodes_v1)',
   code:'โค้ด',saved:'เซฟเมื่อ',sDef:'ค่าเริ่มต้น',by:'โดย',sNew:'ล่าสุด',sPd:'ราคา ↓',sPa:'ราคา ↑',sNa:'ชื่อ ก-ฮ',sNz:'ชื่อ ฮ-ก',grp:'แยกหมวด',flat:'รวม',grid:'ตาราง',list:'รายการ',smaller:'เล็กลง',bigger:'ใหญ่ขึ้น',outfits:'ชุด',fail:'โหลดไม่สำเร็จ ลองใหม่อีกครั้ง',back:'ค้นหาใหม่',
   foot:'ข้อมูลจาก Roblox (สาธารณะ) · ชุดที่เซฟในแมพ = ระบบบันทึกชุดในแมพ รวมมิจของtangsan',
-  cats:{hair:'ผม',head:'หมวก / หัว',face:'หน้า',top:'เสื้อ',bottom:'กางเกง / กระโปรง',shoes:'รองเท้า',acc:'เครื่องประดับ',body:'ร่างกาย',anim:'ท่าเดิน / ท่าทาง',emote:'อีโมต',other:'อื่นๆ'}},
+  cats:{bundle:'ชุดเซ็ต (Bundle)',hair:'ผม',head:'หมวก / หัว',face:'หน้า',top:'เสื้อ',bottom:'กางเกง / กระโปรง',shoes:'รองเท้า',acc:'เครื่องประดับ',body:'ร่างกาย',anim:'ท่าเดิน / ท่าทาง',emote:'อีโมต',other:'อื่นๆ'}},
  en:{ttl:'👕 Roblox Outfit Viewer',sub:"Type an ID or username → see what they're wearing, their saved Roblox outfits and outfits saved in the map",ph:'ID / @username',go:'Search',
   loading:'Loading...',pick:'Several players found — pick one',wearing:'Wearing now',roblox:'Roblox outfits',map:'Saved in map',
   items:'items',total:'Total for items still on sale',free:'Free',off:'Off sale',profile:'Roblox profile',showMore:'Show more',
@@ -573,9 +587,9 @@ const T={
   noMap:'No outfits saved in the map yet',mapPerm:'Map outfits not available yet (the API key needs read access to DataStore PlayerOutfitCodes_v1)',
   code:'Code',saved:'Saved',sDef:'Default',by:'by',sNew:'Newest',sPd:'Price ↓',sPa:'Price ↑',sNa:'Name A-Z',sNz:'Name Z-A',grp:'By category',flat:'All together',grid:'Grid',list:'List',smaller:'Smaller',bigger:'Bigger',outfits:'outfits',fail:'Could not load — please try again',back:'New search',
   foot:'Data from Roblox (public) · Map outfits come from the outfit saver in รวมมิจของtangsan',
-  cats:{hair:'Hair',head:'Hats / Head',face:'Face',top:'Tops',bottom:'Bottoms',shoes:'Shoes',acc:'Accessories',body:'Body',anim:'Animations',emote:'Emotes',other:'Other'}}
+  cats:{bundle:'Bundles',hair:'Hair',head:'Hats / Head',face:'Face',top:'Tops',bottom:'Bottoms',shoes:'Shoes',acc:'Accessories',body:'Body',anim:'Animations',emote:'Emotes',other:'Other'}}
 };
-const ORDER=['hair','head','face','top','bottom','shoes','acc','body','anim','emote','other'];
+const ORDER=['bundle','hair','head','face','top','bottom','shoes','acc','body','anim','emote','other'];
 let L=(()=>{try{return localStorage.getItem('fo_lang')||'th'}catch(e){return 'th'}})();
 const $=s=>document.querySelector(s), out=$('#out'), modal=$('#m'), mb=$('#mb');
 const esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));

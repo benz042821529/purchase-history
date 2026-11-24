@@ -502,14 +502,12 @@ def items(ids):
             req.append({"id": int(k[1:]), "tp": "B"}); back[k] = f"B_{k[1:]}"
         elif k.isdigit():
             req.append({"id": int(k), "tp": "A"}); back[k] = f"A_{k}"
-    # (2026-11-24) ดึงรายละเอียด + สถานะการขาย พร้อมกัน (เดิมทำทีละอย่าง = ช้าเท่าตัว)
-    with ThreadPoolExecutor(max_workers=2) as ex:
-        f_st = ex.submit(_sale_status, req)
-        det = _h["fetch_item_details"](req)
-        try:
-            st_pre = f_st.result()
-        except Exception as e:
-            print(f"[fo sale status] {e}"); st_pre = {}
+    # (2026-11-24) ถามสถานะการขายก่อน แล้วค่อยดึงรายละเอียด — ถ้ายิง catalog พร้อมกัน 2 ทาง Roblox จะตีกลับ (429) แล้วราคาลิมิเต็ดผิด
+    try:
+        st_pre = _sale_status(req)
+    except Exception as e:
+        print(f"[fo sale status] {e}"); st_pre = {}
+    det = _h["fetch_item_details"](req)
     out = {k: dict(det.get(v, {})) for k, v in back.items()}
     # (2026-11-24) ราคาให้ตรงความจริง: ของลิมิเต็ด/ของที่เลิกขาย Roblox ยังส่ง "ราคาเดิม" มา
     # → ลิมิเต็ดที่ซื้อจาก Roblox ไม่ได้แล้ว ใช้ราคาขายต่อถูกสุด (resale) · ของที่เลิกขาย = offsale
@@ -543,10 +541,14 @@ def _sale_status(req):
         return res
     for i in range(0, len(need), 40):
         chunk = need[i:i + 40]
-        try:
-            found = cb([(r["id"], r["tp"]) for r in chunk])
-        except Exception as e:
-            print(f"[fo sale batch] {e}"); continue
+        found = {}
+        for attempt in range(3):
+            try:
+                found = cb([(r["id"], r["tp"]) for r in chunk])
+            except Exception as e:
+                print(f"[fo sale batch] {e}"); found = {}
+            if found: break
+            time.sleep(0.8 * (attempt + 1))
         for r in chunk:
             key = f"{r['tp']}_{r['id']}"
             ci = found.get((r["tp"], r["id"]))
@@ -666,9 +668,7 @@ def handle_get(path, query):
         if path == "/api/fo/invmeta": return 200, INV_META
         if path == "/api/fo/rawsale":  # (2026-11-24) ไว้ตรวจราคา: ข้อมูลดิบจาก catalog ของไอเทมเดียว
             iid = int(g("id") or 0); tp = "B" if g("tp") == "B" else "A"
-            cb = _h.get("catalog_batch")
-            ci = cb([(iid, tp)]).get((tp, iid)) if cb and iid else None
-            return 200, {"catalog": ci, "status": _sale_status([{"id": iid, "tp": tp}]).get(f"{tp}_{iid}")}
+            return 200, {"status": _sale_status([{"id": iid, "tp": tp}]).get(f"{tp}_{iid}") if iid else None}
         if path == "/api/fo/thumbs":
             kind = g("kind")
             if kind not in THUMB_URL: raise FoError(400, "kind")

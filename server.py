@@ -2106,9 +2106,18 @@ window.addEventListener('DOMContentLoaded',load)
 </body>
 </html>"""
 
+# (2026-11-20) หน้า "ดูชุดผู้เล่น" /friends — โค้ดอยู่ใน friend_outfits.py
+import friend_outfits as FO
+FO.init(roblox_get=roblox_get, fetch_item_details=fetch_item_details, base=BASE,
+        cache_get=cache_get, cache_set=cache_set)
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self, fmt, *args):
         print(f"  {args[0]} {args[1]}")
+
+    def _client_ip(self):
+        fwd = self.headers.get("X-Forwarded-For", "")
+        return fwd.split(",")[0].strip() if fwd else self.client_address[0]
 
     def _check_auth(self):
         return self.headers.get("X-Password", "") == PASSWORD
@@ -2118,6 +2127,17 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_POST(self):
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path.startswith("/api/fo/"):
+            if not FO.rate_ok(self._client_ip()):
+                self._json(429, {"message": "ขอถี่เกินไป รอสักครู่แล้วลองใหม่"}); return
+            try:
+                length = int(self.headers.get("Content-Length", 0))
+                body = json.loads(self.rfile.read(min(length, 20000)).decode() or "{}")
+            except Exception:
+                body = {}
+            r = FO.handle_post(parsed.path, body)
+            if r is not None:
+                self._json(*r); return
         if parsed.path == "/api/item-details":
             if not (self._check_auth() or self._check_view()):
                 self._json(401, {"message": "Unauthorized"}); return
@@ -2174,6 +2194,20 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         parsed = urllib.parse.urlparse(self.path)
+        if parsed.path in ("/friends", "/friends/"):
+            b = FO.FO_HTML.encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html;charset=utf-8")
+            self.send_header("Content-Length", str(len(b)))
+            self.end_headers()
+            self.wfile.write(b)
+            return
+        if parsed.path.startswith("/api/fo/"):
+            if not FO.rate_ok(self._client_ip()):
+                self._json(429, {"message": "ขอถี่เกินไป รอสักครู่แล้วลองใหม่"}); return
+            r = FO.handle_get(parsed.path, parsed.query)
+            if r is not None:
+                self._json(*r); return
         if parsed.path == "/api/looks":
             # (2026-11-18) ให้เกมอ่านรายการเลขชุดสำเร็จ (สาธารณะ ไม่มีข้อมูลส่วนตัว)
             self._json(200, load_looks())

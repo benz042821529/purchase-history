@@ -453,6 +453,36 @@ def _inv_assets(uid, types, cursor):
             items.append(_item(aid, a.get("assetType") or "", a.get("name") or a.get("assetName") or ""))
     return items, d.get("nextPageCursor")
 
+PIECE_CATS = {"body", "anim", "shoes", "face"}  # หมวดที่มีชิ้นส่วนของ bundle ปน (หัว/ตัว/แขนขา/ท่าเดิน/รองเท้า/หน้า)
+
+def _bundle_piece_ids(uid):
+    """รหัสชิ้นส่วนทุกชิ้นที่อยู่ใน bundle ที่คนนี้มี → ใช้ซ่อนชิ้นซ้ำในหมวดร่างกาย/ท่าเดิน/รองเท้า/หน้า (bundle ขึ้นเป็นใบเดียวในหมวดชุดเซ็ตแล้ว)"""
+    def go():
+        bids, cur = [], ""
+        for _ in range(10):
+            q = {"limit": 100, "sortOrder": "Desc"}
+            if cur: q["cursor"] = cur
+            d = _req(f"https://catalog.roblox.com/v1/users/{uid}/bundles?" + urllib.parse.urlencode(q))
+            bids += [b["id"] for b in d.get("data") or [] if b.get("id")]
+            cur = d.get("nextPageCursor")
+            if not cur: break
+        ids = set()
+        for k in range(0, len(bids), 50):
+            try:
+                det = _req("https://catalog.roblox.com/v1/bundles/details?bundleIds=" + ",".join(str(x) for x in bids[k:k + 50]))
+            except Exception as e:
+                print(f"[fo inv bundles {uid}] {e}"); continue
+            for b in det if isinstance(det, list) else det.get("data") or []:
+                for it in b.get("items") or []:
+                    if it.get("type") == "Asset" and it.get("id"):
+                        ids.add(int(it["id"]))
+        return sorted(ids)
+    try:
+        return set(_cached(("invpieces", uid), 600, go))
+    except Exception as e:
+        print(f"[fo inv pieces {uid}] {e}")
+        return set()
+
 def inventory(uid, cat, cursor):
     if cat not in INV_CATS:
         raise FoError(400, "หมวดไม่ถูกต้อง")
@@ -467,7 +497,13 @@ def inventory(uid, cat, cursor):
                           "cat": "bundle", "name": b.get("name", "")} for b in d.get("data") or [] if b.get("id")]
                 return {"items": items, "next": d.get("nextPageCursor"), "private": False}
             items, nxt = _inv_assets(uid, INV_TYPES[cat], cursor)
-            return {"items": items, "next": nxt, "private": False}
+            hidden = 0
+            if cat in PIECE_CATS and items:
+                pieces = _bundle_piece_ids(uid)
+                keep = [it for it in items if it["id"] not in pieces]
+                hidden = len(items) - len(keep)
+                items = keep
+            return {"items": items, "next": nxt, "private": False, "hidden": hidden}
         except urllib.error.HTTPError as e:
             if e.code in (401, 403):
                 return {"items": [], "next": None, "private": True}
@@ -626,7 +662,7 @@ const T={
   loading:'กำลังโหลด...',pick:'เจอหลายคน เลือกคนที่ใช่',wearing:'ใส่อยู่ตอนนี้',roblox:'ชุดใน Roblox',map:'ชุดที่เซฟในแมพ',
   items:'ชิ้น',total:'ราคารวมชิ้นที่ยังขาย',free:'ฟรี',off:'ไม่ขาย',profile:'โปรไฟล์ Roblox',showMore:'แสดงเพิ่ม',
   noRoblox:'ไม่มีชุดที่สร้างเก็บไว้ใน Roblox',priv:'🔒 เจ้าตัวปิดการดูไอเทม/ชุดไว้ ดูได้แค่ชุดที่ใส่อยู่',
-  noMap:'ยังไม่เคยเซฟชุดในแมพ',inv:'ไอเทมทั้งหมด',invPriv:'🔒 เจ้าตัวปิดการดูคลังไอเทมไว้ เลยดูไอเทมทั้งหมดไม่ได้',invEmpty:'ไม่มีไอเทมในหมวดนี้',invHint:'ไอเทมที่อยู่ในคลังของคนนี้ เรียงจากที่ได้มาล่าสุด',mapPerm:'ยังเปิดดูชุดในแมพไม่ได้ (ต้องเพิ่มสิทธิ์ API key ให้อ่าน DataStore PlayerOutfitCodes_v1)',
+  noMap:'ยังไม่เคยเซฟชุดในแมพ',inv:'ไอเทมทั้งหมด',invPriv:'🔒 เจ้าตัวปิดการดูคลังไอเทมไว้ เลยดูไอเทมทั้งหมดไม่ได้',invEmpty:'ไม่มีไอเทมในหมวดนี้',invHint:'ไอเทมที่อยู่ในคลังของคนนี้ เรียงจากที่ได้มาล่าสุด',invHid:'ซ่อนชิ้นส่วนที่อยู่ในชุดเซ็ตแล้ว',mapPerm:'ยังเปิดดูชุดในแมพไม่ได้ (ต้องเพิ่มสิทธิ์ API key ให้อ่าน DataStore PlayerOutfitCodes_v1)',
   code:'โค้ด',saved:'เซฟเมื่อ',sDef:'ค่าเริ่มต้น',by:'โดย',sNew:'ล่าสุด',sPd:'ราคา ↓',sPa:'ราคา ↑',sNa:'ชื่อ ก-ฮ',sNz:'ชื่อ ฮ-ก',grp:'แยกหมวด',flat:'รวม',grid:'ตาราง',list:'รายการ',smaller:'เล็กลง',bigger:'ใหญ่ขึ้น',outfits:'ชุด',fail:'โหลดไม่สำเร็จ ลองใหม่อีกครั้ง',back:'ค้นหาใหม่',
   foot:'ข้อมูลจาก Roblox (สาธารณะ) · ชุดที่เซฟในแมพ = ระบบบันทึกชุดในแมพ รวมมิจของtangsan',
   cats:{bundle:'ชุดเซ็ต (Bundle)',hair:'ผม',head:'หมวก / หัว',face:'หน้า',top:'เสื้อ',bottom:'กางเกง / กระโปรง',shoes:'รองเท้า',acc:'เครื่องประดับ',body:'ร่างกาย',anim:'ท่าเดิน / ท่าทาง',emote:'อีโมต',other:'อื่นๆ'}},
@@ -634,7 +670,7 @@ const T={
   loading:'Loading...',pick:'Several players found — pick one',wearing:'Wearing now',roblox:'Roblox outfits',map:'Saved in map',
   items:'items',total:'Total for items still on sale',free:'Free',off:'Off sale',profile:'Roblox profile',showMore:'Show more',
   noRoblox:'No outfits saved on their Roblox account',priv:'🔒 This player hides their inventory — only the current outfit is visible',
-  noMap:'No outfits saved in the map yet',inv:'All items',invPriv:'🔒 This player hides their inventory, so their items can\'t be shown',invEmpty:'No items in this category',invHint:'Items in this player\'s inventory, newest first',mapPerm:'Map outfits not available yet (the API key needs read access to DataStore PlayerOutfitCodes_v1)',
+  noMap:'No outfits saved in the map yet',inv:'All items',invPriv:'🔒 This player hides their inventory, so their items can\'t be shown',invEmpty:'No items in this category',invHint:'Items in this player\'s inventory, newest first',invHid:'pieces already shown under Bundles were hidden',mapPerm:'Map outfits not available yet (the API key needs read access to DataStore PlayerOutfitCodes_v1)',
   code:'Code',saved:'Saved',sDef:'Default',by:'by',sNew:'Newest',sPd:'Price ↓',sPa:'Price ↑',sNa:'Name A-Z',sNz:'Name Z-A',grp:'By category',flat:'All together',grid:'Grid',list:'List',smaller:'Smaller',bigger:'Bigger',outfits:'outfits',fail:'Could not load — please try again',back:'New search',
   foot:'Data from Roblox (public) · Map outfits come from the outfit saver in รวมมิจของtangsan',
   cats:{bundle:'Bundles',hair:'Hair',head:'Hats / Head',face:'Face',top:'Tops',bottom:'Bottoms',shoes:'Shoes',acc:'Accessories',body:'Body',anim:'Animations',emote:'Emotes',other:'Other'}}
@@ -774,7 +810,7 @@ function renderPerson(){
     else if(st.private) h+='<div class="note">'+t('invPriv')+'</div>';
     else if(!st.items.length) h+='<div class="note">'+t('invEmpty')+'</div>';
     else{
-      h+='<div class="total">'+esc(t('invHint'))+'</div>'+barHtml('items',st.items.length+(st.next?'+':'')+' '+t('items'));
+      h+='<div class="total">'+esc(t('invHint'))+(st.hidden?' · '+st.hidden+' '+esc(t('invHid')):'')+'</div>'+barHtml('items',st.items.length+(st.next?'+':'')+' '+t('items'));
       const g0=ui.grp; ui.grp=false; h+=itemsHtml(st.items); ui.grp=g0;
       if(st.next) h+='<button class="btn ghost more" id="imore">'+(st.loading?t('loading'):t('showMore'))+'</button>';
     }
@@ -824,7 +860,7 @@ async function loadInv(cat,more){
   try{
     const r=await api('/api/fo/inv?uid='+p.id+'&cat='+cat+(more&&st.next?'&cursor='+encodeURIComponent(st.next):''));
     if(person!==p) return;
-    st.private=r.private; st.items=(more&&st.items?st.items:[]).concat(r.items||[]); st.next=r.next||null;
+    st.private=r.private; st.hidden=(more?(st.hidden||0):0)+(r.hidden||0); st.items=(more&&st.items?st.items:[]).concat(r.items||[]); st.next=r.next||null;
     st.loading=false; if(tab==='inv'&&invCat===cat) renderPerson();
     await fillItems((r.items||[]).map(kOf));
   }catch(e){st.loading=false; if(!st.items) st.err=e.message}

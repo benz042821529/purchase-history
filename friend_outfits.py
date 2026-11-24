@@ -646,12 +646,17 @@ header h1 small{display:block;font-size:13px;font-weight:400;color:var(--sub);ma
 .tab.on{background:var(--lilac);color:#241b38;font-weight:500}
 .wear{display:grid;grid-template-columns:minmax(220px,300px) 1fr;gap:14px}
 @media(max-width:720px){.wear{grid-template-columns:1fr}}
-.avatar{background:var(--panel);border-radius:16px;padding:10px;text-align:center;align-self:start}
+.avatar{background:var(--panel);border-radius:16px;padding:10px;text-align:center;align-self:start;position:sticky;top:10px}
+@media(max-width:720px){.avatar{position:static}}
 .avatar img{width:100%;max-width:300px;aspect-ratio:1;object-fit:contain}
 .avatar .sum{color:var(--sub);font-size:13px;margin-top:6px}
 .cat{margin-bottom:14px}
 .cat h3{font-size:14px;font-weight:500;color:var(--lilac);margin:0 0 8px}
 .items{display:grid;grid-template-columns:repeat(auto-fill,minmax(var(--isz,110px),1fr));gap:6px}
+.cats{display:flex;flex-wrap:wrap;gap:12px 18px;align-items:flex-start}
+.cats .cat{margin:0;flex:0 1 auto;max-width:100%}
+.cats .items{display:flex;flex-wrap:wrap}
+.cats .item{width:var(--isz,110px)}
 .item{background:var(--panel);border-radius:12px;padding:6px;display:flex;flex-direction:column;gap:4px;text-decoration:none}
 .item:hover{outline:1px solid var(--lilac)}
 .item .th{background:var(--card);border-radius:10px;aspect-ratio:1;display:flex;align-items:center;justify-content:center;overflow:hidden}
@@ -827,7 +832,7 @@ function itemsHtml(items){
     const o=SUBLBL[c], name=o?(o.main?lbl(o.main)+' · '+lbl(o):lbl(o)):T[L].cats.other;
     h+='<div class="cat"><h3>'+esc(name)+' · '+groups[c].length+'</h3><div class="'+wrap+'">'+groups[c].map(itemCard).join('')+'</div></div>';
   });
-  return h;
+  return wrap==='items'?'<div class="cats">'+h+'</div>':h;
 }
 function totalHtml(items){
   let sum=0;items.forEach(it=>{const d=itemCache[kOf(it)];if(d&&d.price>0)sum+=d.price});

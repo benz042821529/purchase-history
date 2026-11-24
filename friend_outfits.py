@@ -517,6 +517,10 @@ def items(ids):
             s2 = st.get(v)
             if not s2: continue
             d = out[k]
+            # รายละเอียดชุดหลังโดน Roblox ตีกลับ (ชื่อว่าง) → ใช้ข้อมูลจาก catalog รอบแรกแทน
+            if not d.get("name") and s2.get("name"):
+                d["name"] = s2["name"]; d["creator"] = s2.get("creator", "")
+                if s2.get("price") and not d.get("price"): d["price"] = s2["price"]
             if s2.get("resale"):
                 d["price"] = s2["resale"]; d["resale"] = True
             elif s2.get("offsale"):
@@ -533,7 +537,7 @@ def _sale_status(req):
     res, need = {}, []
     for r in req:
         key = f"{r['tp']}_{r['id']}"
-        c = _h["cache_get"](("fo", "sale2", key), 600)
+        c = _h["cache_get"](("fo", "sale3", key), 600)
         if c is not None: res[key] = c
         else: need.append(r)
     cb = _h.get("catalog_batch")
@@ -560,11 +564,12 @@ def _sale_status(req):
             units = ci.get("unitsAvailableForConsumption")
             off = legacy or bool(ci.get("isOffSale")) or status == "Off Sale" or (limited and units == 0)
             lowest = ci.get("lowestResalePrice") or ci.get("lowestPrice") or 0
-            info = {"offsale": off, "limited": limited, "resale": 0}
+            info = {"offsale": off, "limited": limited, "resale": 0,
+                    "name": ci.get("name") or "", "creator": ci.get("creatorName") or "", "price": ci.get("price") or 0}
             if limited and off and lowest:
                 info["resale"] = int(lowest)
             res[key] = info
-            _h["cache_set"](("fo", "sale2", key), info)
+            _h["cache_set"](("fo", "sale3", key), info)
     return res
 
 def merge_map(idx_items):
@@ -927,6 +932,17 @@ async function fillItems(ids,onStep){
     try{Object.assign(itemCache,await api('/api/fo/items',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:c})}))}catch(e){}
     if(onStep) onStep()}};
   await Promise.all([worker(),worker(),worker()]);
+  // ชิ้นที่ยังไม่ได้ชื่อ (Roblox ตอบช้า/ตีกลับ) → ลองใหม่อีก 2 รอบ
+  for(let n=0;n<2;n++){
+    const miss=need.filter(k=>itemCache[k]&&!itemCache[k].name);
+    if(!miss.length) break;
+    await new Promise(r=>setTimeout(r,2500*(n+1)));
+    for(let k=0;k<miss.length;k+=60){
+      try{const got=await api('/api/fo/items',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:miss.slice(k,k+60)})});
+        for(const id in got){ if(got[id]&&got[id].name) itemCache[id]=got[id]; }}catch(e){}
+    }
+    if(onStep) onStep();
+  }
 }
 function itemCard(it){
   const d=itemCache[kOf(it)]||{};
